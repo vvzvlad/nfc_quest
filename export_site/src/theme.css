@@ -1,0 +1,286 @@
+/* ─────────────────────────────────────────────────────────────
+   Периметр / NFC Quest — theme tokens
+   Палитры и шрифты подключаются через data-attrs на :root.
+   ───────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=PT+Mono&family=PT+Sans:wght@400;700&display=swap');
+
+/* Palette: default (Периметр) */
+:root {
+  --bg:        #0c0d0e;
+  --bg-2:      #15171a;
+  --bg-3:      #1d2024;
+  --line:      #2a2e34;
+  --line-2:    #3a3f47;
+  --fg:        #ededed;
+  --fg-2:      #c9ccd1;
+  --muted:     #7c8088;
+  --muted-2:   #5a5e66;
+  --accent:    #e63935;   /* Metascan red */
+  --accent-2:  #ff5a51;
+  --accent-ink:#fff5f3;
+  --success:   #6cd07a;
+  --success-2: #2a7d35;
+  --warn:      #f0b429;
+  --danger:    #e63935;
+  --info:      #4aa9ff;
+  --gold:      #f6cd5b;
+  --silver:    #c8cdd4;
+  --bronze:    #c98452;
+  --grid:      rgba(255,255,255,0.04);
+}
+
+[data-palette="acid"] {
+  --bg:        #08090a;
+  --bg-2:      #0f1213;
+  --bg-3:      #161a1c;
+  --line:      #1f2426;
+  --line-2:    #2c3336;
+  --fg:        #eef0ec;
+  --fg-2:      #c2c8bf;
+  --muted:     #757b73;
+  --muted-2:   #51564f;
+  --accent:    #c4ff3d;
+  --accent-2:  #d8ff6b;
+  --accent-ink:#0a1500;
+  --success:   #c4ff3d;
+  --success-2: #2a7d35;
+  --warn:      #f0b429;
+  --danger:    #ff5454;
+  --info:      #4aa9ff;
+  --gold:      #f6cd5b;
+  --silver:    #c8cdd4;
+  --bronze:    #c98452;
+  --grid:      rgba(196,255,61,0.05);
+}
+
+[data-palette="paper"] {
+  --bg:        #f1ebde;
+  --bg-2:      #e7e0d0;
+  --bg-3:      #ddd5c2;
+  --line:      #c8c0ad;
+  --line-2:    #a89e87;
+  --fg:        #1a1714;
+  --fg-2:      #3a342c;
+  --muted:     #7a7160;
+  --muted-2:   #a89e87;
+  --accent:    #c1281c;
+  --accent-2:  #e63935;
+  --accent-ink:#fff5f3;
+  --success:   #1f7a3a;
+  --success-2: #144b22;
+  --warn:      #b07a16;
+  --danger:    #c1281c;
+  --info:      #2058a3;
+  --gold:      #b78b1c;
+  --silver:    #888;
+  --bronze:    #a55c2c;
+  --grid:      rgba(0,0,0,0.04);
+}
+
+[data-palette="cobalt"] {
+  --bg:        #0a1130;
+  --bg-2:      #11194a;
+  --bg-3:      #182362;
+  --line:      #1f2b75;
+  --line-2:    #2e3d92;
+  --fg:        #ecefff;
+  --fg-2:      #b7c0e8;
+  --muted:     #7b87b8;
+  --muted-2:   #515f8b;
+  --accent:    #ff5b3c;
+  --accent-2:  #ffa07d;
+  --accent-ink:#fff5f1;
+  --success:   #6cd07a;
+  --success-2: #2a7d35;
+  --warn:      #f0b429;
+  --danger:    #ff4f4f;
+  --info:      #82b1ff;
+  --gold:      #f6cd5b;
+  --silver:    #c8cdd4;
+  --bronze:    #c98452;
+  --grid:      rgba(255,255,255,0.04);
+}
+
+/* Font stacks */
+:root {
+  --font-mono:    'IBM Plex Mono', ui-monospace, monospace;
+  --font-sans:    'Inter Tight', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Inter Tight', ui-sans-serif, system-ui, sans-serif;
+}
+
+[data-font="jetbrains"] {
+  --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+  --font-sans:    'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+}
+
+[data-font="space"] {
+  --font-mono:    'Space Mono', ui-monospace, monospace;
+  --font-sans:    'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+}
+
+[data-font="pt"] {
+  --font-mono:    'PT Mono', ui-monospace, monospace;
+  --font-sans:    'PT Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'PT Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ───────────── base ───────────── */
+
+.app, .app * {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  color: var(--fg);
+  background: var(--bg);
+  font-family: var(--font-sans);
+}
+
+/* Re-usable bits */
+.mono { font-family: var(--font-mono); font-feature-settings: "ss01","zero"; letter-spacing: 0; }
+.sans { font-family: var(--font-sans); }
+.display { font-family: var(--font-display); letter-spacing: -0.02em; }
+
+.kbd, .pill, .chip, .tag {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+/* Stencil bracket text */
+.bracket::before { content: "["; color: var(--muted); padding-right: 4px; }
+.bracket::after  { content: "]"; color: var(--muted); padding-left: 4px; }
+
+/* Buttons */
+.btn {
+  appearance: none;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 16px;
+  padding: 16px 20px;
+  border-radius: 0;
+  cursor: pointer;
+  transition: transform 80ms ease, opacity 80ms ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn.ghost {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--line-2);
+}
+.btn.sm { font-size: 13px; padding: 9px 12px; }
+
+/* Inputs */
+.input {
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  padding: 16px 16px;
+  outline: none;
+}
+.input:focus { border-color: var(--accent); }
+.input.sm { font-size: 13px; padding: 8px 10px; }
+.input::placeholder { color: var(--muted-2); }
+
+/* Cards */
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+
+/* Cross-hair / grid background utility */
+.grid-bg {
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* horizontal rule */
+.hr { height: 1px; background: var(--line); width: 100%; }
+
+/* Crosshairs for periметр corners */
+.crosshair {
+  position: relative;
+}
+.crosshair::before, .crosshair::after,
+.crosshair > .ch-tl, .crosshair > .ch-tr,
+.crosshair > .ch-bl, .crosshair > .ch-br { display: none; }
+
+/* Scrollbars — minimal */
+.app *::-webkit-scrollbar { width: 8px; height: 8px; }
+.app *::-webkit-scrollbar-thumb { background: var(--line-2); }
+.app *::-webkit-scrollbar-track { background: transparent; }
+
+/* Tag chip */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  background: transparent;
+  white-space: nowrap;
+}
+.tag-chip.solid {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.tag-chip.dim {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+/* Section labels at corners */
+.corner-label {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* Bracket headings */
+.brak {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.brak::before { content: "[ "; }
+.brak::after  { content: " ]"; }
+
+/* Pulse for live indicators */
+@keyframes pulse-dot {
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.25; }
+}
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+/* digit ticker */
+.tabular { font-variant-numeric: tabular-nums; }
