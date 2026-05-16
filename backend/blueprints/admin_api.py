@@ -124,6 +124,8 @@ def put_game():
 @_require_admin
 def start_game():
     """Set starts_at=now; if ends_at is missing or in the past, set ends_at=now+2h."""
+    from socket_events import broadcast_scoreboard
+
     settings = _get_or_create_settings()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -132,6 +134,7 @@ def start_game():
         settings.ends_at = now + timedelta(hours=2)
 
     db.session.commit()
+    broadcast_scoreboard()
     return jsonify(settings.to_dict()), 200
 
 
@@ -139,9 +142,12 @@ def start_game():
 @_require_admin
 def stop_game():
     """Set ends_at=now to immediately finish the game."""
+    from socket_events import broadcast_scoreboard
+
     settings = _get_or_create_settings()
     settings.ends_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.session.commit()
+    broadcast_scoreboard()
     return jsonify(settings.to_dict()), 200
 
 
