@@ -57,6 +57,16 @@ function PhoneHost({ children }) {
   );
 }
 
+// AdminHost: full-viewport host for admin panel screens (no fixed canvas, responsive).
+function AdminHost({ children }) {
+  return (
+    <div style={{
+      width: '100vw', height: '100vh', background: 'var(--bg)',
+      overflow: 'hidden', display: 'flex', flexDirection: 'column',
+    }}>{children}</div>
+  );
+}
+
 // ─── PlayerPage ───────────────────────────────────────────────────────────────
 
 // Possible phases:
@@ -229,13 +239,13 @@ export default function App() {
         {/* Hall display (1920×1080) */}
         <Route path="/hall" element={<ScaleHost width={1920} height={1080}><ScreenHallScoreboard /></ScaleHost>} />
 
-        {/* Admin screens (1440×900) */}
-        <Route path="/admin/login"   element={<ScaleHost width={1440} height={900}><ScreenAdminLogin /></ScaleHost>} />
-        <Route path="/admin"         element={<ScaleHost width={1440} height={900}><ScreenAdminGame /></ScaleHost>} />
-        <Route path="/admin/game"    element={<ScaleHost width={1440} height={900}><ScreenAdminGame /></ScaleHost>} />
-        <Route path="/admin/tags"    element={<ScaleHost width={1440} height={900}><ScreenAdminTags /></ScaleHost>} />
-        <Route path="/admin/players" element={<ScaleHost width={1440} height={900}><ScreenAdminPlayers /></ScaleHost>} />
-        <Route path="/admin/log"     element={<ScaleHost width={1440} height={900}><ScreenAdminLog /></ScaleHost>} />
+        {/* Admin screens — full viewport, no fixed canvas */}
+        <Route path="/admin/login"   element={<AdminHost><ScreenAdminLogin /></AdminHost>} />
+        <Route path="/admin"         element={<AdminHost><ScreenAdminGame /></AdminHost>} />
+        <Route path="/admin/game"    element={<AdminHost><ScreenAdminGame /></AdminHost>} />
+        <Route path="/admin/tags"    element={<AdminHost><ScreenAdminTags /></AdminHost>} />
+        <Route path="/admin/players" element={<AdminHost><ScreenAdminPlayers /></AdminHost>} />
+        <Route path="/admin/log"     element={<AdminHost><ScreenAdminLog /></AdminHost>} />
       </Routes>
     </QuestCtx.Provider>
   );

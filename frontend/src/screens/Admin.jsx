@@ -11,7 +11,7 @@ function AdminShell({ section, title, breadcrumb, actions, children, login = fal
   if (login) {
     return (
       <div style={{
-        width: 1440, height: 900,
+        width: '100%', height: '100%',
         background: 'var(--bg)', color: 'var(--fg)',
         fontFamily: 'var(--font-sans)',
         display: 'grid', placeItems: 'center',
@@ -24,7 +24,7 @@ function AdminShell({ section, title, breadcrumb, actions, children, login = fal
   }
   return (
     <div style={{
-      width: 1440, height: 900,
+      width: '100%', height: '100%',
       background: 'var(--bg)', color: 'var(--fg)',
       fontFamily: 'var(--font-sans)',
       display: 'grid', gridTemplateColumns: '232px 1fr',
