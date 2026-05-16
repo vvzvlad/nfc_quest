@@ -629,9 +629,6 @@ function ScreenScoreboardMobile({ initialData }) {
         </div>
         <div style={{ height: 20 }} />
       </div>
-      <QuestFooter>
-        <button className="btn ghost">← вернуться к сканированию</button>
-      </QuestFooter>
     </div>
   );
 }
