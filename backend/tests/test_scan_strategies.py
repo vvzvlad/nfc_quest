@@ -107,6 +107,184 @@ class TestStrategies:
         body2 = r2.get_json()
         assert body2["total"] == -30
 
+    # S-M4: Tag with empty strategy_params defaults to 0 points for unlimited strategy
+    def test_scan_empty_strategy_params(self, client, admin_client):
+        start_game(admin_client)
+        # Create unlimited tag with no "points" key in params — strategy should default to 0
+        tags = create_tag(admin_client, "unlimited", {})
+        tag_id = tags[0]["id"]
+        register_player(client, "player-sm4", "PlayerSM4")
+
+        r = scan_tag(client, "player-sm4", tag_id)
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["status"] == "ok"
+        assert body["delta"] == 0
+
+    # S-M5: Random strategy with min == max always returns exactly that value
+    def test_scan_random_min_equals_max(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "random", {"min": 7, "max": 7})
+        tag_id = tags[0]["id"]
+        register_player(client, "player-sm5", "PlayerSM5")
+
+        r = scan_tag(client, "player-sm5", tag_id)
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["status"] == "ok"
+        assert body["delta"] == 7
+
+    # S-M6: Random strategy with inverted range (min > max) still works — strategies.py swaps lo/hi
+    def test_scan_random_inverted_range(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 5})
+        tag_id = tags[0]["id"]
+
+        deltas = []
+        for i in range(20):
+            pid = f"player-sm6-{i}"
+            register_player(client, pid, f"PlayerSM6_{i}")
+            rate_limiter.clear()
+            r = scan_tag(client, pid, tag_id)
+            body = r.get_json()
+            assert body["status"] == "ok", f"Expected ok but got: {body}"
+            deltas.append(body["delta"])
+
+        # Despite inverted range, all deltas must be in [5, 10]
+        for d in deltas:
+            assert 5 <= d <= 10, f"Delta {d} out of inverted range [5, 10]"
+
+    # S-M7: Tag with unknown strategy returns status "unknown"
+    def test_scan_unknown_strategy_tag(self, client, admin_client):
+        # Create a tag using an unrecognised strategy name
+        r_batch = admin_client.post(
+            "/admin/api/tags/batch",
+            json={"strategy": "mystery_box", "strategy_params": {}, "count": 1},
+        )
+        assert r_batch.status_code == 201
+        tag_id = r_batch.get_json()["items"][0]["id"]
+
+        start_game(admin_client)
+        register_player(client, "player-sm7", "PlayerSM7")
+
+        r = scan_tag(client, "player-sm7", tag_id)
+        assert r.status_code == 200
+        assert r.get_json()["status"] == "unknown"
+
+    # S-M9: one_time_global tag — same player scanning it a second time gets "locked"
+    def test_scan_one_time_global_locked_for_original_player(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "one_time_global", {"points": 30})
+        tag_id = tags[0]["id"]
+        register_player(client, "player-sm9", "PlayerSM9")
+
+        # First scan: should succeed
+        r1 = scan_tag(client, "player-sm9", tag_id)
+        assert r1.get_json()["status"] == "ok"
+
+        # Same player scans again — tag is globally locked
+        rate_limiter.clear()
+        r2 = scan_tag(client, "player-sm9", tag_id)
+        assert r2.get_json()["status"] == "locked"
+
+    # C3-fix: one_time_per_player order independence — B scans first, then A; both succeed
+    def test_scan_one_time_per_player_order_independence(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "one_time_per_player", {"points": 15})
+        tag_id = tags[0]["id"]
+
+        register_player(client, "player-c3fix-a", "PlayerC3FixA")
+        register_player(client, "player-c3fix-b", "PlayerC3FixB")
+
+        # Player B scans first
+        r_b1 = scan_tag(client, "player-c3fix-b", tag_id)
+        assert r_b1.get_json()["status"] == "ok"
+
+        # Player A scans second — must also succeed (independent per player)
+        rate_limiter.clear()
+        r_a1 = scan_tag(client, "player-c3fix-a", tag_id)
+        assert r_a1.get_json()["status"] == "ok"
+
+        # Player A scans again — must be locked
+        rate_limiter.clear()
+        r_a2 = scan_tag(client, "player-c3fix-a", tag_id)
+        assert r_a2.get_json()["status"] == "locked"
+
+        # Player B scans again — must also be locked
+        rate_limiter.clear()
+        r_b2 = scan_tag(client, "player-c3fix-b", tag_id)
+        assert r_b2.get_json()["status"] == "locked"
+
+    # C4-fix: Same player can scan a random tag multiple times; every result is "ok"
+    def test_scan_random_same_player_multiple_times(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "random", {"min": 5, "max": 10})
+        tag_id = tags[0]["id"]
+        register_player(client, "player-c4fix", "PlayerC4Fix")
+
+        total = 0
+        for _ in range(10):
+            rate_limiter.clear()
+            r = scan_tag(client, "player-c4fix", tag_id)
+            body = r.get_json()
+            assert body["status"] == "ok", f"Expected ok but got: {body}"
+            assert 5 <= body["delta"] <= 10, f"Delta {body['delta']} out of range [5,10]"
+            total += body["delta"]
+
+        # After 10 scans with range [5,10], cumulative total must be in [50, 100]
+        assert 50 <= total <= 100, f"Total {total} outside expected range [50, 100]"
+
+    # S-new-1: Scanning multiple one_time_per_player tags accumulates points correctly
+    def test_scan_one_time_per_player_multiple_tags_accumulates(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, "player-snew1", "PlayerSNew1")
+
+        # Create 3 independent one_time_per_player tags worth 20 pts each
+        tag_ids = []
+        for _ in range(3):
+            tags = create_tag(admin_client, "one_time_per_player", {"points": 20})
+            tag_ids.append(tags[0]["id"])
+
+        # Scan all three — each should succeed
+        for tag_id in tag_ids:
+            rate_limiter.clear()
+            r = scan_tag(client, "player-snew1", tag_id)
+            assert r.get_json()["status"] == "ok"
+
+        # Total points on scoreboard should be 60
+        sb = client.get("/api/scoreboard").get_json()
+        player_data = next(p for p in sb["players"] if p["nick"] == "PlayerSNew1")
+        assert player_data["points"] == 60
+
+        # Scanning any of the tags again should now be locked
+        rate_limiter.clear()
+        r_lock = scan_tag(client, "player-snew1", tag_ids[0])
+        assert r_lock.get_json()["status"] == "locked"
+
+    # S-new-2: Random strategy works with negative and mixed ranges
+    def test_scan_random_negative_range(self, client, admin_client):
+        start_game(admin_client)
+
+        # Negative-only range: [-20, -5]
+        tags_neg = create_tag(admin_client, "random", {"min": -20, "max": -5})
+        tag_neg_id = tags_neg[0]["id"]
+        register_player(client, "player-snew2a", "PlayerSNew2A")
+
+        r_neg = scan_tag(client, "player-snew2a", tag_neg_id)
+        body_neg = r_neg.get_json()
+        assert body_neg["status"] == "ok"
+        assert -20 <= body_neg["delta"] <= -5, f"Delta {body_neg['delta']} out of range [-20, -5]"
+
+        # Mixed range: [-10, 10]
+        tags_mix = create_tag(admin_client, "random", {"min": -10, "max": 10})
+        tag_mix_id = tags_mix[0]["id"]
+        register_player(client, "player-snew2b", "PlayerSNew2B")
+
+        r_mix = scan_tag(client, "player-snew2b", tag_mix_id)
+        body_mix = r_mix.get_json()
+        assert body_mix["status"] == "ok"
+        assert -10 <= body_mix["delta"] <= 10, f"Delta {body_mix['delta']} out of range [-10, 10]"
+
 
 class TestRateLimit:
     # D1: Two immediate scans by the same player → second returns 429
@@ -142,3 +320,64 @@ class TestRateLimit:
         r2 = scan_tag(client, "player-d2", tag_id)
         assert r2.status_code == 200
         assert r2.get_json()["status"] == "ok"
+
+    # D-M1: Rate limit applies across different tags — same player, different tags
+    def test_rate_limit_applies_across_different_tags(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, "player-dm1", "PlayerDM1")
+        tags1 = create_tag(admin_client, "unlimited", {"points": 10})
+        tags2 = create_tag(admin_client, "unlimited", {"points": 10})
+        tag1_id = tags1[0]["id"]
+        tag2_id = tags2[0]["id"]
+
+        # First scan on tag1 succeeds
+        rate_limiter.clear()
+        r1 = scan_tag(client, "player-dm1", tag1_id)
+        assert r1.status_code == 200
+        assert r1.get_json()["status"] == "ok"
+
+        # Immediately scan tag2 with the same player — must be rate-limited
+        r2 = scan_tag(client, "player-dm1", tag2_id)
+        assert r2.status_code == 429
+
+    # D-M2: Rate limit is per-player — different players have independent cooldowns
+    def test_rate_limit_independent_for_different_players(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, "player-dm2a", "PlayerDM2A")
+        register_player(client, "player-dm2b", "PlayerDM2B")
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+
+        # Player A scans first
+        rate_limiter.clear()
+        r_a = scan_tag(client, "player-dm2a", tag_id)
+        assert r_a.status_code == 200
+        assert r_a.get_json()["status"] == "ok"
+
+        # Player B scans immediately after — should NOT be rate-limited (independent limiter)
+        r_b = scan_tag(client, "player-dm2b", tag_id)
+        assert r_b.status_code == 200
+        body_b = r_b.get_json()
+        # Status can be "ok" or "locked" (if one_time_global) but must NOT be 429
+        assert body_b.get("status") in ("ok", "locked", "unknown"), \
+            f"Expected ok/locked/unknown but got: {body_b}"
+
+    # D-M3: Rate-limited response body must have status="rate_limit" and non-empty message
+    def test_rate_limit_429_body(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, "player-dm3", "PlayerDM3")
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+
+        # First scan succeeds
+        rate_limiter.clear()
+        r1 = scan_tag(client, "player-dm3", tag_id)
+        assert r1.status_code == 200
+
+        # Second immediate scan must return 429 with correct body shape
+        r2 = scan_tag(client, "player-dm3", tag_id)
+        assert r2.status_code == 429
+        body = r2.get_json()
+        assert body.get("status") == "rate_limit"
+        assert isinstance(body.get("message"), str)
+        assert len(body["message"]) > 0

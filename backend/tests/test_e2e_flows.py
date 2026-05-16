@@ -96,7 +96,11 @@ class TestE2EFlows:
         admin_client.post("/admin/api/game/start")
         r2 = scan_tag(client, "player-f3", tag_id)
         assert r2.status_code == 200
-        assert r2.get_json()["status"] == "ok"
+        body2 = r2.get_json()
+        assert body2["status"] == "ok"
+        # F3-fix: verify scan response includes delta and total fields
+        assert body2["delta"] == 10
+        assert body2["total"] == 10
 
         # Step 3: Stop the game — scan returns "finished"
         rate_limiter.clear()
@@ -109,3 +113,78 @@ class TestE2EFlows:
         r_sb = client.get("/api/scoreboard")
         sb_body = r_sb.get_json()
         assert sb_body["game"]["status"] == "finished"
+
+    # F4: Register a player and immediately scan (mimics real user flow)
+    def test_register_then_immediately_scan(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+
+        # Register and scan back-to-back
+        register_player(client, "player-f4", "PlayerF4")
+        r_scan = scan_tag(client, "player-f4", tag_id)
+        assert r_scan.status_code == 200
+        body = r_scan.get_json()
+        assert body["status"] == "ok"
+        assert body["delta"] > 0
+
+    # F5: Rate limit is checked even when game has not started yet
+    def test_rate_limit_priority_when_game_not_started(self, client, admin_client):
+        # Set game to not_started state (future starts_at)
+        admin_client.put(
+            "/admin/api/game",
+            json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
+        )
+        register_player(client, "player-f5", "PlayerF5")
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+
+        # First scan returns "not_yet" and updates rate_limiter
+        rate_limiter.clear()
+        r1 = scan_tag(client, "player-f5", tag_id)
+        assert r1.get_json()["status"] == "not_yet"
+
+        # Second immediate scan WITHOUT clearing rate_limiter — must be rate-limited
+        r2 = scan_tag(client, "player-f5", tag_id)
+        assert r2.status_code == 429
+
+    # F6: Registration is blocked when game has already finished
+    # WILL FAIL — current code returns 201 regardless of game state
+    def test_registration_blocked_when_game_finished(self, client, admin_client):
+        # Set game to finished state (both dates in the past)
+        admin_client.put(
+            "/admin/api/game",
+            json={
+                "starts_at": "2000-01-01T00:00:00Z",
+                "ends_at": "2000-06-01T00:00:00Z",
+            },
+        )
+
+        # Attempt to register a new player
+        r = register_player(client, "player-f6", "PlayerF6")
+        assert r.status_code == 403
+        assert "error" in r.get_json()
+
+    # F7: award_message from game settings is returned in scan response when game is finished
+    def test_award_message_in_scan_response_matches_admin_setting(self, client, admin_client):
+        # Configure game with a custom award_message and set it as finished
+        admin_client.put(
+            "/admin/api/game",
+            json={
+                "starts_at": "2000-01-01T00:00:00Z",
+                "ends_at": "2000-06-01T00:00:00Z",
+                "award_message": "Prize ceremony at 6pm",
+            },
+        )
+
+        register_player(client, "player-f7", "PlayerF7")
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+
+        # Scan in finished game state
+        rate_limiter.clear()
+        r = scan_tag(client, "player-f7", tag_id)
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["status"] == "finished"
+        assert body["award_message"] == "Prize ceremony at 6pm"

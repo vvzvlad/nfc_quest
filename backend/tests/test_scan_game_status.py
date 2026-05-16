@@ -1,7 +1,9 @@
 """
 Block B: Scan endpoint — game status gating tests.
 """
+import pytest
 from helpers import start_game, create_tag, register_player, scan_tag
+from blueprints.game_api import rate_limiter
 
 
 class TestScanGameStatus:
@@ -59,3 +61,39 @@ class TestScanGameStatus:
         assert r.status_code == 200
         body = r.get_json()
         assert body["status"] == "unknown"
+
+    # S-M1: Missing or empty required fields in scan request → 400
+    @pytest.mark.parametrize("payload,expected_status", [
+        ({}, 400),                                                    # empty body
+        ({"player_id": "p1"}, 400),                                   # no tag_id
+        ({"tag_id": "AAAA-AAA"}, 400),                                # no player_id
+        ({"player_id": "", "tag_id": "AAAA-AAA"}, 400),               # empty player_id
+    ])
+    def test_scan_missing_fields(self, client, admin_client, payload, expected_status):
+        start_game(admin_client)
+        r = client.post("/api/scan", json=payload)
+        assert r.status_code == expected_status
+
+    # B5: Rate limit check happens BEFORE game status check
+    # When game is stopped and player scans immediately after first scan (no rate_limiter.clear()),
+    # the second scan returns 429, not the game-finished response.
+    def test_rate_limit_priority_over_game_status(self, client, admin_client):
+        # Start game, register player, create tag
+        start_game(admin_client)
+        register_player(client, "player-b5", "PlayerB5")
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+
+        # First scan succeeds while game is active
+        rate_limiter.clear()
+        r1 = scan_tag(client, "player-b5", tag_id)
+        assert r1.status_code == 200
+        assert r1.get_json()["status"] == "ok"
+
+        # Stop the game so it's now finished
+        admin_client.post("/admin/api/game/stop")
+
+        # Immediately scan again WITHOUT clearing rate_limiter — should get 429, not "finished"
+        r2 = scan_tag(client, "player-b5", tag_id)
+        assert r2.status_code == 429
+        assert r2.get_json()["status"] == "rate_limit"

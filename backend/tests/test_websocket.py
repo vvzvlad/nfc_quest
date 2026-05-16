@@ -130,3 +130,90 @@ def test_ws_no_broadcast_on_locked_scan(app, client, admin_client, ws_client):
     assert len(broadcast_events) == 0, (
         "scoreboard_update must not be broadcast after a locked scan"
     )
+
+
+def test_ws_no_broadcast_on_not_yet_scan(app, client, admin_client, ws_client):
+    """WS-M1: Scanning while game has not started must NOT broadcast scoreboard_update."""
+    from helpers import create_tag, register_player, scan_tag
+    from blueprints.game_api import rate_limiter
+
+    # Set game far in the future so it has not started yet
+    admin_client.put(
+        "/admin/api/game",
+        json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
+    )
+
+    # Drain initial connect events
+    ws_client.get_received()
+
+    register_player(client, "player-wm1", "PlayerWM1")
+    tags = create_tag(admin_client, "unlimited", {"points": 10})
+    tag_id = tags[0]["id"]
+
+    # Scan — should return "not_yet"
+    rate_limiter.clear()
+    r = scan_tag(client, "player-wm1", tag_id)
+    assert r.get_json()["status"] == "not_yet"
+
+    # No scoreboard_update broadcast should have been emitted
+    received = ws_client.get_received()
+    broadcast_events = [e for e in received if e["name"] == "scoreboard_update"]
+    assert len(broadcast_events) == 0, (
+        "scoreboard_update must not be broadcast after a not_yet scan"
+    )
+
+
+def test_ws_no_broadcast_on_finished_scan(app, client, admin_client, ws_client):
+    """WS-M1b: Scanning when game is finished must NOT broadcast scoreboard_update."""
+    from helpers import create_tag, register_player, scan_tag
+    from blueprints.game_api import rate_limiter
+
+    # Set game in the distant past so it is finished
+    admin_client.put(
+        "/admin/api/game",
+        json={"starts_at": "2000-01-01T00:00:00Z", "ends_at": "2000-06-01T00:00:00Z"},
+    )
+
+    # Drain initial connect events
+    ws_client.get_received()
+
+    register_player(client, "player-wm1b", "PlayerWM1B")
+    tags = create_tag(admin_client, "unlimited", {"points": 10})
+    tag_id = tags[0]["id"]
+
+    # Scan — should return "finished"
+    rate_limiter.clear()
+    r = scan_tag(client, "player-wm1b", tag_id)
+    assert r.get_json()["status"] == "finished"
+
+    # No scoreboard_update broadcast should have been emitted
+    received = ws_client.get_received()
+    broadcast_events = [e for e in received if e["name"] == "scoreboard_update"]
+    assert len(broadcast_events) == 0, (
+        "scoreboard_update must not be broadcast after a finished scan"
+    )
+
+
+def test_ws_broadcast_after_admin_adjust(app, client, admin_client, ws_client):
+    """WS-M2: Admin adjusting player points must broadcast scoreboard_update.
+    WILL FAIL — current adjust_player() does NOT call broadcast_scoreboard().
+    """
+    from helpers import start_game, register_player
+
+    start_game(admin_client)
+    r_reg = register_player(client, "player-wm2", "PlayerWM2")
+    player_id = r_reg.get_json()["player_id"]
+
+    # Drain connect event
+    ws_client.get_received()
+
+    # Admin adjusts player points — this should trigger a broadcast
+    r_adj = admin_client.post(f"/admin/api/players/{player_id}/adjust", json={"delta": 100})
+    assert r_adj.status_code == 200
+
+    # WS client should receive scoreboard_update
+    received = ws_client.get_received()
+    event = next((e for e in received if e["name"] == "scoreboard_update"), None)
+    assert event is not None, (
+        "Expected scoreboard_update broadcast after admin point adjustment, but none received"
+    )
