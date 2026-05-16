@@ -7,7 +7,7 @@ const ERROR_MESSAGES = {
   NICK_TAKEN:            'Никнейм уже занят',
   PLAYER_NOT_FOUND:      'Игрок не найден',
   TAG_NOT_FOUND:         'Метка не найдена',
-  RATE_LIMIT_WAIT:       'Подождите секунду и попробуйте снова',
+  RATE_LIMIT_WAIT:       'Подождите секунду и попробуйте снова.',
 
   // Admin API errors
   UNAUTHORIZED:          'Нет доступа — необходима авторизация',
