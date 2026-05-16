@@ -172,12 +172,13 @@ def scan():
     points_after = player.points
 
     # Build strategy_display string
+    sign = "+" if delta >= 0 else ""
     if tag.strategy == "random":
-        strategy_display = f"hidden · random +{delta}"
+        strategy_display = f"hidden · random {sign}{delta}"
     elif tag.strategy in ("one_time_global", "one_time_per_player"):
-        strategy_display = f"hidden · {tag.strategy} +{delta}"
+        strategy_display = f"hidden · {tag.strategy} {sign}{delta}"
     else:
-        strategy_display = f"hidden · {tag.strategy} +{delta}"
+        strategy_display = f"hidden · {tag.strategy} {sign}{delta}"
 
     meta = f"{points_before} → {points_after}  ·  место #{rank_before} → #{rank_after}"
 

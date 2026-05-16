@@ -107,6 +107,6 @@ class TestRandomNegativeDisplay:
         assert body["status"] == "ok"
         assert body["delta"] < 0
         assert "strategy_display" in body
-        # Documents the double-sign bug: "random +-N"
         display = body["strategy_display"]
-        assert "+-" in display or display is not None
+        assert "+-" not in display, f"Double-sign bug: {display}"
+        assert f"random {body['delta']}" in display
