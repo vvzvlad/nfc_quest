@@ -143,9 +143,18 @@ def scan():
         }), 200
 
     if game_status == "finished":
+        # Compute rank using the same ordering as the scoreboard: points DESC, registered_at ASC
+        all_players = db.session.query(Player).order_by(
+            Player.points.desc(), Player.registered_at.asc()
+        ).all()
+        rank = next(
+            (i + 1 for i, p in enumerate(all_players) if p.id == player_id),
+            None,
+        )
         return jsonify({
             "status": "finished",
             "award_message": settings.award_message or "",
+            "rank": rank,
         }), 200
 
     # --- Player lookup ---

@@ -257,14 +257,10 @@ function PlayerPage() {
     }
     if (status === 'locked')     return <ScanLocked   {...commonProps} />;
     if (status === 'not_yet')    return <ScanNotYet   {...commonProps} timerTarget={scanResult.starts_at} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
-    // Find the current player's rank using the rank field returned by the scoreboard API
-    const myRank = scoreboardData?.players
-      ? (scoreboardData.players.find(p => p.nick === myNick)?.rank ?? null)
-      : null;
     if (status === 'finished') {
-      // Show bright winner screen for top-10 players
-      if (myRank && myRank <= 10) {
-        return <ScanFinishedWinner user={myNick} score={liveScore} rank={myRank} />;
+      // Use rank returned directly by the backend scan response
+      if (scanResult.rank && scanResult.rank <= 10) {
+        return <ScanFinishedWinner user={myNick} score={liveScore} rank={scanResult.rank} />;
       }
       return <ScanFinished {...commonProps} awardMessage={scanResult.award_message} />;
     }
