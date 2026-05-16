@@ -69,7 +69,11 @@ def register():
 
     player = Player(id=player_id, nick=nick, points=0)
     db.session.add(player)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Nickname is already taken"}), 409
 
     return jsonify({
         "player_id": player.id,

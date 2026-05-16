@@ -1,5 +1,5 @@
 """
-Concurrency tests: race conditions in one_time_global and one_time_per_player strategies.
+Concurrency tests: race conditions in one_time_global, one_time_per_player, and registration.
 """
 import threading
 
@@ -35,6 +35,28 @@ class TestConcurrentOneTimeGlobal:
         statuses = [r["status"] for r in results]
         assert statuses.count("ok") == 1, f"Expected exactly one 'ok', got: {statuses}"
         assert statuses.count("locked") == 1, f"Expected exactly one 'locked', got: {statuses}"
+
+
+class TestConcurrentRegistration:
+    def test_concurrent_register_same_nick_no_500(self, app):
+        """Two simultaneous registrations with the same nick: one gets 201, the other 409 (not 500)."""
+        results = []
+
+        def do_register(player_id):
+            with app.test_client() as c:
+                r = c.post("/api/register", json={"player_id": player_id, "nick": "SameNick"})
+                results.append(r.status_code)
+
+        t1 = threading.Thread(target=do_register, args=("uuid-race-1",))
+        t2 = threading.Thread(target=do_register, args=("uuid-race-2",))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert 201 in results, f"Expected one 201, got: {results}"
+        assert all(s in (201, 409) for s in results), f"Expected 201/409 only, got: {results}"
+        assert results.count(201) == 1, f"Expected exactly one 201, got: {results}"
 
 
 class TestConcurrentOneTimePerPlayer:
