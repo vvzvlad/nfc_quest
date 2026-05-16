@@ -4,6 +4,7 @@ import { QuestCtx } from '../QuestContext.js';
 import { CornerBrackets } from './Player.jsx';
 import { Stat } from './Hall.jsx';
 import { adminApi } from '../api.js';
+import { getErrorMessage } from '../i18n.js';
 
 // Admin.jsx — Admin panel (5 screens)
 // Linear/Notion-density: persistent sidebar + dense content.
@@ -233,7 +234,7 @@ function ScreenAdminLogin() {
     if (res.ok) {
       navigate('/admin');
     } else {
-      setError(res.data?.error || 'Неверный пароль');
+      setError(getErrorMessage(res.data?.error, 'Неверный пароль'));
     }
     setLoading(false);
   };

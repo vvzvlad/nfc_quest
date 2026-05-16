@@ -97,7 +97,7 @@ class TestBulkDeletePlayers:
         rate_limiter.clear()
         r = scan_tag(client, "player-deleted", tag_id)
         assert r.status_code == 404
-        assert "Player not found" in r.get_json()["error"]
+        assert r.get_json()["error"] == "PLAYER_NOT_FOUND"
 
 
 class TestNegativePointsScoreboard:

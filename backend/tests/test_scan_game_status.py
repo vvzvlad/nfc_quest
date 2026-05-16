@@ -50,7 +50,7 @@ class TestScanGameStatus:
         assert r.status_code == 404
         body = r.get_json()
         assert "error" in body
-        assert "Player not found" in body["error"]
+        assert body["error"] == "PLAYER_NOT_FOUND"
 
     # B4: Scan with unknown tag while game is active → status "unknown"
     def test_scan_unknown_tag(self, client, admin_client):

@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QuestCtx } from '../QuestContext.js';
 import { connectSocket, disconnectSocket, getLocalPlayer, api } from '../api.js';
+import { getErrorMessage } from '../i18n.js';
 
 // screens/Player.jsx — Player flow (mobile)
 // Registration → Scan result (7 states) → Mobile scoreboard
@@ -571,7 +572,7 @@ function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLab
 }
 
 // State: rate-limited
-function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
+function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers, message }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -580,7 +581,7 @@ function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerL
       tone="warn"
       scanLabel="scan · throttled"
       hero={<span style={{ fontSize: 62, letterSpacing: '-0.04em' }}>WAIT</span>}
-      sub="Подождите секунду и попробуйте снова."
+      sub={getErrorMessage(message, 'Подождите секунду и попробуйте снова.')}
       strategy="rate limit · 1 скан / сек"
       meta="retry в течение ~ 0.6 сек"
       boardSlice={boardSlice || defaultBoardSlice(user)}

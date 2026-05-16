@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { QuestCtx } from './QuestContext.js';
 import { getLocalPlayer, setLocalPlayer, api } from './api.js';
+import { getErrorMessage } from './i18n.js';
 import {
   ScreenRegistration,
   ScanSuccessPlus, ScanSuccessMinus, ScanLocked, ScanNotYet,
@@ -183,7 +184,7 @@ function PlayerPage() {
       const { ok, status, data } = await api.register(player_id, nick);
 
       if (!ok) {
-        setRegistrationError(data.error || 'Ошибка регистрации');
+        setRegistrationError(getErrorMessage(data.error, 'Ошибка регистрации'));
         return;
       }
 
@@ -257,7 +258,7 @@ function PlayerPage() {
     if (status === 'locked')     return <ScanLocked   {...commonProps} />;
     if (status === 'not_yet')    return <ScanNotYet   {...commonProps} timerTarget={scanResult.starts_at} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
     if (status === 'finished')   return <ScanFinished {...commonProps} awardMessage={scanResult.award_message} />;
-    if (status === 'rate_limit') return <ScanRateLimit {...commonProps} />;
+    if (status === 'rate_limit') return <ScanRateLimit {...commonProps} message={scanResult.message} />;
     // Covers 'unknown' and any unexpected status values
     return <ScanUnknown {...commonProps} />;
   }

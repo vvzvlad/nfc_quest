@@ -45,14 +45,14 @@ def register():
     nick = (data.get("nick") or "").strip()
 
     if not player_id or not nick:
-        return jsonify({"error": "Необходимы player_id и nick"}), 400
+        return jsonify({"error": "MISSING_FIELDS"}), 400
 
     # Block registration if the game has already ended
     settings = db.session.get(GameSettings, 1)
     if settings is not None:
         now = datetime.now(timezone.utc)
         if settings.get_status(now) == "finished":
-            return jsonify({"error": "Регистрация закрыта — игра завершена"}), 403
+            return jsonify({"error": "REGISTRATION_CLOSED"}), 403
 
     # Idempotency: if player_id already exists, return existing player
     existing_by_id = db.session.get(Player, player_id)
@@ -66,7 +66,7 @@ def register():
     # Nick conflict: another player already holds this nick
     existing_by_nick = db.session.query(Player).filter_by(nick=nick).first()
     if existing_by_nick and existing_by_nick.id != player_id:
-        return jsonify({"error": "Никнейм уже занят"}), 409
+        return jsonify({"error": "NICK_TAKEN"}), 409
 
     player = Player(id=player_id, nick=nick, points=0)
     db.session.add(player)
@@ -74,7 +74,7 @@ def register():
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        return jsonify({"error": "Никнейм уже занят"}), 409
+        return jsonify({"error": "NICK_TAKEN"}), 409
 
     return jsonify({
         "player_id": player.id,
@@ -95,13 +95,13 @@ def scan():
     player_id = (data.get("player_id") or "").strip()
 
     if not tag_id or not player_id:
-        return jsonify({"error": "Необходимы tag_id и player_id"}), 400
+        return jsonify({"error": "MISSING_FIELDS"}), 400
 
     # --- Rate limit check ---
     now = datetime.now(timezone.utc)
     last_scan = rate_limiter.get(player_id)
     if last_scan and (now - last_scan).total_seconds() < RATE_LIMIT_SECONDS:
-        return jsonify({"status": "rate_limit", "message": "Подождите секунду и попробуйте снова."}), 429
+        return jsonify({"status": "rate_limit", "message": "RATE_LIMIT_WAIT"}), 429
 
     # Update rate limiter immediately after passing the rate limit check
     rate_limiter[player_id] = now
@@ -133,7 +133,7 @@ def scan():
     # --- Player lookup ---
     player = db.session.get(Player, player_id)
     if player is None:
-        return jsonify({"error": "Игрок не найден"}), 404
+        return jsonify({"error": "PLAYER_NOT_FOUND"}), 404
 
     # --- Tag lookup ---
     tag = db.session.get(Tag, tag_id)

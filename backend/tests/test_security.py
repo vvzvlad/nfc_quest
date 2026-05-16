@@ -67,7 +67,7 @@ class TestAdminBruteForce:
         # 6th attempt should be rate-limited
         r = client.post("/admin/api/login", json={"password": "wrong-6"})
         assert r.status_code == 429
-        assert "Too many" in r.get_json()["error"]
+        assert r.get_json()["error"] == "LOGIN_RATE_LIMIT"
 
     def test_login_rate_limit_does_not_block_correct_password_before_limit(self, client):
         """Correct password succeeds if under the rate limit threshold."""
