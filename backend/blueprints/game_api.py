@@ -46,6 +46,13 @@ def register():
     if not player_id or not nick:
         return jsonify({"error": "player_id and nick are required"}), 400
 
+    # Block registration if the game has already ended
+    settings = db.session.get(GameSettings, 1)
+    if settings is not None:
+        now = datetime.now(timezone.utc)
+        if settings.get_status(now) == "finished":
+            return jsonify({"error": "Registration is closed — the game has ended"}), 403
+
     # Idempotency: if player_id already exists, return existing player
     existing_by_id = db.session.get(Player, player_id)
     if existing_by_id:

@@ -80,6 +80,14 @@ def put_game():
     if "award_message" in data:
         settings.award_message = data["award_message"]
 
+    # Validate: if both dates are set, ends_at must be at least 10 minutes after starts_at
+    if settings.starts_at is not None and settings.ends_at is not None:
+        min_duration = timedelta(minutes=10)
+        if settings.ends_at <= settings.starts_at:
+            return jsonify({"error": "ends_at must be after starts_at"}), 400
+        if (settings.ends_at - settings.starts_at) < min_duration:
+            return jsonify({"error": "Game must last at least 10 minutes"}), 400
+
     db.session.commit()
     return jsonify(settings.to_dict()), 200
 
@@ -175,6 +183,11 @@ def adjust_player(player_id):
 
     player.points += delta_int
     db.session.commit()
+
+    # Broadcast updated scoreboard to all connected WebSocket clients
+    from socket_events import broadcast_scoreboard  # deferred import to avoid circular deps
+    broadcast_scoreboard()
+
     return jsonify({"player_id": player.id, "nick": player.nick, "points": player.points}), 200
 
 
