@@ -3,6 +3,7 @@ Security tests: XSS/injection in nicks, SQL injection in filters, admin brute-fo
 tag ID enumeration, batch limits, WebSocket client messages.
 """
 import pytest
+from datetime import datetime, timezone, timedelta
 
 from helpers import start_game, create_tag, register_player, scan_tag
 from blueprints.game_api import rate_limiter
@@ -54,21 +55,85 @@ class TestSQLInjectionLogFilters:
 
 
 class TestAdminBruteForce:
-    def test_many_failed_logins_no_crash(self, client):
-        """100 failed login attempts don't crash the server."""
-        for i in range(100):
+    def test_login_rate_limit_kicks_in_after_5_attempts(self, client):
+        """After 5 failed logins within 60s, further attempts get 429."""
+        from blueprints.admin_api import _login_attempts
+        _login_attempts.clear()
+
+        for i in range(5):
             r = client.post("/admin/api/login", json={"password": f"wrong-{i}"})
             assert r.status_code == 401
 
-        # Valid login still works after all failures
+        # 6th attempt should be rate-limited
+        r = client.post("/admin/api/login", json={"password": "wrong-6"})
+        assert r.status_code == 429
+        assert "Too many" in r.get_json()["error"]
+
+    def test_login_rate_limit_does_not_block_correct_password_before_limit(self, client):
+        """Correct password succeeds if under the rate limit threshold."""
+        from blueprints.admin_api import _login_attempts
+        _login_attempts.clear()
+
+        # 4 failed attempts (under limit of 5)
+        for i in range(4):
+            client.post("/admin/api/login", json={"password": f"wrong-{i}"})
+
+        # Correct password on 5th attempt should still work
         r_ok = client.post("/admin/api/login", json={"password": "testpass"})
         assert r_ok.status_code == 200
 
-    def test_no_rate_limit_on_admin_login(self, client):
-        """Documents: no rate limit on admin login currently exists."""
-        for _ in range(10):
-            r = client.post("/admin/api/login", json={"password": "wrong"})
+    def test_login_rate_limit_blocks_even_correct_password(self, client):
+        """Once rate-limited, even the correct password is rejected with 429."""
+        from blueprints.admin_api import _login_attempts
+        _login_attempts.clear()
+
+        for i in range(5):
+            client.post("/admin/api/login", json={"password": f"wrong-{i}"})
+
+        # Correct password should also be blocked
+        r = client.post("/admin/api/login", json={"password": "testpass"})
+        assert r.status_code == 429
+
+    def test_login_rate_limit_resets_after_window(self, client):
+        """After the rate limit window expires, login attempts work again."""
+        from blueprints.admin_api import _login_attempts, LOGIN_RATE_LIMIT_WINDOW
+        _login_attempts.clear()
+
+        # Exhaust the limit
+        for i in range(5):
+            client.post("/admin/api/login", json={"password": f"wrong-{i}"})
+
+        # Simulate time passing by backdating all attempts
+        ip = "127.0.0.1"
+        past = datetime.now(timezone.utc) - timedelta(seconds=LOGIN_RATE_LIMIT_WINDOW + 1)
+        _login_attempts[ip] = [past] * 5
+
+        # Should work now
+        r = client.post("/admin/api/login", json={"password": "testpass"})
+        assert r.status_code == 200
+
+    def test_successful_login_clears_attempt_counter(self, client):
+        """Successful login resets the failed attempt counter for that IP."""
+        from blueprints.admin_api import _login_attempts
+        _login_attempts.clear()
+
+        # 3 failed attempts
+        for i in range(3):
+            client.post("/admin/api/login", json={"password": f"wrong-{i}"})
+
+        # Successful login
+        r = client.post("/admin/api/login", json={"password": "testpass"})
+        assert r.status_code == 200
+
+        # Logout and try 5 more wrong passwords — counter should have reset
+        client.post("/admin/api/logout")
+        for i in range(5):
+            r = client.post("/admin/api/login", json={"password": f"wrong-again-{i}"})
             assert r.status_code == 401
+
+        # 6th after reset — NOW it should be rate-limited
+        r = client.post("/admin/api/login", json={"password": "wrong-final"})
+        assert r.status_code == 429
 
 
 class TestTagIdEnumeration:

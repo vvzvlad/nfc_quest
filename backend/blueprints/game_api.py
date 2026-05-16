@@ -196,7 +196,7 @@ def scoreboard():
     """Return current scoreboard with player rankings and game stats."""
     now = datetime.now(timezone.utc)
 
-    players = db.session.query(Player).order_by(Player.points.desc()).all()
+    players = db.session.query(Player).order_by(Player.points.desc(), Player.registered_at.asc()).all()
     players_data = [
         {"rank": i + 1, "nick": p.nick, "points": p.points}
         for i, p in enumerate(players)

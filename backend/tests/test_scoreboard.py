@@ -57,35 +57,37 @@ class TestScoreboard:
         assert body["stats"]["total_tags"] == 0
         assert body["stats"]["scans_per_minute"] == 0.0
 
-    # E-M1: Players with equal points should receive different ranks based on registration order.
-    # NOTE: scoreboard() assigns ranks as i+1 (positional), NOT via _get_rank().
-    # The ORDER BY points DESC has no secondary sort, so order for equal-points players
-    # is SQLite-implementation-defined. This test currently passes because the lexicographic
-    # order of PKs ("player-em1a" < "player-em1b") happens to match registration order.
-    # Once a proper secondary sort by registered_at is added, the test will be deterministic.
+    # E-M1: Tie-breaking by registration time (earlier registration = higher rank).
+    # Uses PKs where lexicographic order is OPPOSITE to registration order,
+    # so the test fails if the query relies on PK order instead of registered_at.
     def test_scoreboard_tie_breaking_by_registration_order(self, client, admin_client):
+        import time
         start_game(admin_client)
 
-        # Alice registers first, Bob second
+        # Bob registers first but has PK "player-em1z" (lexicographically LATER)
+        register_player(client, "player-em1z", "Bob")
+        time.sleep(0.05)
+        # Alice registers second but has PK "player-em1a" (lexicographically EARLIER)
         register_player(client, "player-em1a", "Alice")
-        register_player(client, "player-em1b", "Bob")
 
-        # Give both players exactly 50 points
+        # Give both exactly 50 points
+        admin_client.post("/admin/api/players/player-em1z/adjust", json={"delta": 50})
         admin_client.post("/admin/api/players/player-em1a/adjust", json={"delta": 50})
-        admin_client.post("/admin/api/players/player-em1b/adjust", json={"delta": 50})
 
         r = client.get("/api/scoreboard")
         assert r.status_code == 200
         players = r.get_json()["players"]
         assert len(players) == 2
 
-        # Find Alice and Bob by nick
-        alice = next(p for p in players if p["nick"] == "Alice")
-        bob = next(p for p in players if p["nick"] == "Bob")
-
-        # Alice registered first, so she should be rank 1; Bob rank 2
-        assert alice["rank"] == 1, f"Alice should be rank 1 but got {alice['rank']}"
-        assert bob["rank"] == 2, f"Bob should be rank 2 but got {bob['rank']}"
+        # Bob registered first → rank 1; Alice registered second → rank 2
+        assert players[0]["nick"] == "Bob", (
+            f"Expected Bob (registered first) at rank 1, got {players[0]['nick']}"
+        )
+        assert players[0]["rank"] == 1
+        assert players[1]["nick"] == "Alice", (
+            f"Expected Alice (registered second) at rank 2, got {players[1]['nick']}"
+        )
+        assert players[1]["rank"] == 2
 
     # E-M2: Scoreboard for a not_started game includes a starts_at ISO-8601 string
     def test_scoreboard_not_started_has_starts_at(self, client, admin_client):

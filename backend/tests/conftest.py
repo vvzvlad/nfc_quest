@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import Config
 from app import create_app
 from blueprints.game_api import rate_limiter
+from blueprints.admin_api import _login_attempts
 
 
 class TestConfig(Config):
@@ -34,6 +35,7 @@ def app():
 
     # Clean rate limiter state so tests don't bleed into each other
     rate_limiter.clear()
+    _login_attempts.clear()
     os.unlink(db_path)
 
 

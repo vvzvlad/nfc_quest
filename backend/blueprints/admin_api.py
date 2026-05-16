@@ -14,6 +14,11 @@ admin_api = Blueprint("admin_api", __name__)
 # Auth helpers
 # ---------------------------------------------------------------------------
 
+# Login rate limiter: {ip: [timestamp, timestamp, ...]}
+_login_attempts: dict[str, list[datetime]] = {}
+LOGIN_RATE_LIMIT_WINDOW = 60  # seconds
+LOGIN_RATE_LIMIT_MAX = 5  # max attempts per window
+
 
 def _require_admin(f):
     """Decorator: reject request if not logged in as admin."""
@@ -25,6 +30,19 @@ def _require_admin(f):
     return decorated
 
 
+def _check_login_rate_limit() -> bool:
+    """Return True if the request is rate-limited."""
+    ip = request.remote_addr or "unknown"
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=LOGIN_RATE_LIMIT_WINDOW)
+
+    attempts = _login_attempts.get(ip, [])
+    attempts = [t for t in attempts if t > cutoff]
+    _login_attempts[ip] = attempts
+
+    return len(attempts) >= LOGIN_RATE_LIMIT_MAX
+
+
 # ---------------------------------------------------------------------------
 # Auth endpoints
 # ---------------------------------------------------------------------------
@@ -32,11 +50,21 @@ def _require_admin(f):
 
 @admin_api.route("/login", methods=["POST"])
 def login():
+    if _check_login_rate_limit():
+        return jsonify({"error": "Too many login attempts. Try again later."}), 429
+
     data = request.get_json(silent=True) or {}
     password = data.get("password", "")
+
+    ip = request.remote_addr or "unknown"
+    now = datetime.now(timezone.utc)
+
     if password == current_app.config["ADMIN_PASSWORD"]:
+        _login_attempts.pop(ip, None)
         session["admin"] = True
         return jsonify({"ok": True}), 200
+
+    _login_attempts.setdefault(ip, []).append(now)
     return jsonify({"error": "Invalid password"}), 401
 
 

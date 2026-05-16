@@ -2,6 +2,7 @@ import os
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 from models import db, GameSettings
@@ -14,6 +15,8 @@ def create_app(config_class=Config) -> Flask:
     """Flask application factory."""
     app = Flask(__name__, static_folder=None)
     app.config.from_object(config_class)
+
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     # Ensure the SQLite data directory exists
     db_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
