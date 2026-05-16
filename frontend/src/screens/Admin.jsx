@@ -71,7 +71,7 @@ function AdminSidebar({ active }) {
   const now = Date.now();
   const startsAt = game.starts_at ? new Date(game.starts_at).getTime() : null;
   const endsAt = game.ends_at ? new Date(game.ends_at).getTime() : null;
-  let gameStatusLabel = 'НЕТ ДАТ';
+  let gameStatusLabel = 'НЕ НАЧАТА';
   let gameStatusColor = 'var(--muted)';
   let gameStatusBorder = 'var(--line)';
   let gameStatusBg = 'transparent';
@@ -260,6 +260,27 @@ function ScreenAdminLogin() {
   );
 }
 
+// ─── Datetime helpers for UTC↔local conversion ──────────────────
+// Backend stores datetimes in UTC naive format; browser datetime-local inputs
+// operate in the user's local timezone. These helpers convert between them.
+
+// Convert a UTC ISO string (e.g. "2026-05-16T03:45:00Z") to a value
+// suitable for <input type="datetime-local"> (local time, no timezone).
+function utcToLocalInput(utcStr) {
+  if (!utcStr) return '';
+  const d = new Date(utcStr.endsWith('Z') ? utcStr : utcStr + 'Z');
+  // Format as "YYYY-MM-DDTHH:MM" in local time
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Convert a datetime-local input value (local time) to a UTC ISO string
+// that the backend will interpret correctly.
+function localInputToUtc(localStr) {
+  if (!localStr) return null;
+  return new Date(localStr).toISOString();
+}
+
 // ─── Screen 5: Game management ──────────────────────────────────
 function ScreenAdminGame() {
   const [settings, setSettings] = React.useState({});
@@ -347,16 +368,16 @@ function ScreenAdminGame() {
                 <input
                   className="input"
                   type="datetime-local"
-                  value={settings.starts_at ? settings.starts_at.slice(0, 16) : ''}
-                  onChange={e => setSettings(s => ({ ...s, starts_at: e.target.value ? e.target.value + ':00' : null }))}
+                  value={settings.starts_at ? utcToLocalInput(settings.starts_at) : ''}
+                  onChange={e => setSettings(s => ({ ...s, starts_at: e.target.value ? localInputToUtc(e.target.value) : null }))}
                 />
               </Field>
               <Field label="конец игры" hint="МСК">
                 <input
                   className="input"
                   type="datetime-local"
-                  value={settings.ends_at ? settings.ends_at.slice(0, 16) : ''}
-                  onChange={e => setSettings(s => ({ ...s, ends_at: e.target.value ? e.target.value + ':00' : null }))}
+                  value={settings.ends_at ? utcToLocalInput(settings.ends_at) : ''}
+                  onChange={e => setSettings(s => ({ ...s, ends_at: e.target.value ? localInputToUtc(e.target.value) : null }))}
                 />
               </Field>
             </div>
