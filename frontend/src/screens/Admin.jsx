@@ -614,7 +614,7 @@ function ScreenAdminTags() {
           </div>
 
           {/* dense table */}
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: 'var(--font-sans)' }}>
+          <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 12, fontFamily: 'var(--font-sans)' }}>
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', background: 'var(--bg-2)' }}>
                 {[
@@ -1084,6 +1084,7 @@ function ScreenAdminPlayers() {
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState('');
   const [exportingPlayers, setExportingPlayers] = React.useState(false);
+  const [globalStats, setGlobalStats] = React.useState(null);
   const perPage = 50;
 
   const loadPlayers = React.useCallback(() => {
@@ -1101,6 +1102,11 @@ function ScreenAdminPlayers() {
 
   React.useEffect(() => { loadPlayers(); }, [loadPlayers]);
 
+  // Load global stats once on mount; not re-fetched on page change since stats are global
+  React.useEffect(() => {
+    adminApi.getStats().then(r => { if (r.ok) setGlobalStats(r.data); });
+  }, []);
+
   const handleAdjust = async (id, nick) => {
     const raw = window.prompt(`Изменить баллы для ${nick} (положительное или отрицательное число):`);
     if (raw === null) return;
@@ -1115,10 +1121,6 @@ function ScreenAdminPlayers() {
     await adminApi.deletePlayer(id);
     loadPlayers();
   };
-
-  // Compute summary stats from loaded page
-  const maxPoints = players.length ? Math.max(...players.map(p => p.points || 0)) : 0;
-  const avgPoints = players.length ? Math.round(players.reduce((s, p) => s + (p.points || 0), 0) / players.length) : 0;
 
   return (
     <AdminShell
@@ -1143,8 +1145,8 @@ function ScreenAdminPlayers() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
           <Stat label="всего" value={String(total)} />
           <Stat label="на странице" value={String(players.length)} />
-          <Stat label="макс баллов" value={String(maxPoints)} />
-          <Stat label="ср. баллов" value={String(avgPoints)} />
+          <Stat label="макс баллов" value={String(globalStats?.max_score?.points ?? '—')} />
+          <Stat label="ср. баллов" value={String(globalStats?.avg_score ?? '—')} />
         </div>
 
         <div style={{ border: '1px solid var(--line)' }}>
@@ -1176,7 +1178,7 @@ function ScreenAdminPlayers() {
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', color: i < 3 ? 'var(--accent)' : 'var(--muted)' }}>
                     {String((page - 1) * perPage + i + 1).padStart(2,'0')}
                   </td>
-                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', color: 'var(--fg)' }}>{p.nick}</td>
+                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', color: 'var(--fg)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nick}</td>
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
                     {p.id ? p.id.slice(0, 8) + '…' : '—'}
                   </td>

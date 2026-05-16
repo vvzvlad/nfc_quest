@@ -1,7 +1,7 @@
 import React from 'react';
 import { Routes, Route, Navigate, useParams, Outlet } from 'react-router-dom';
 import { QuestCtx } from './QuestContext.js';
-import { getLocalPlayer, setLocalPlayer, api, adminApi } from './api.js';
+import { getLocalPlayer, setLocalPlayer, clearLocalPlayer, api, adminApi } from './api.js';
 import { getErrorMessage } from './i18n.js';
 import {
   ScreenRegistration,
@@ -111,6 +111,12 @@ function PlayerPage() {
       const scanRes = await api.scan(tag_id, player_id);
 
       if (!scanRes.ok) {
+        // If the player was deleted server-side, clear stale localStorage and re-register
+        if (scanRes.data?.error === 'PLAYER_NOT_FOUND') {
+          clearLocalPlayer();
+          setPhase('registration');
+          return;
+        }
         setPhase('error');
         return;
       }

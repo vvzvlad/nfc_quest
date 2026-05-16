@@ -405,17 +405,6 @@ function CornerBrackets() {
   );
 }
 
-// ─── Static fallback board slice (used when no real data is provided) ────────
-function defaultBoardSlice(myNick) {
-  return [
-    [2, 'phr34k',         760],
-    [3, 'captain_pcap',   710],
-    [4, myNick || 'r00t_kit', 310, { mine: true }],
-    [5, 'sudo_make_love', 265],
-    [6, 'kernel_panic',   230],
-  ];
-}
-
 // ─── Variants of scan-result screen (states) ────────────────────
 // Each shares ScanResultLayout and feeds it a leaderboard slice
 // centered on the player's row, so the table is right there.
@@ -430,7 +419,7 @@ function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boa
     hero={delta != null ? (delta >= 0 ? `+${delta}` : `${delta}`) : '+?'}
     sub={strategyDisplay || 'Спрятанная метка. Лежала под чёрной доской.'}
     meta={meta || ''}
-    boardSlice={boardSlice || defaultBoardSlice(user)}
+    boardSlice={boardSlice}
     boardTimer={boardTimer || ''}
     boardTimerLabel={boardTimerLabel || 'до конца'}
     timerTarget={timerTarget}
@@ -448,7 +437,7 @@ function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, bo
     hero={delta != null ? String(delta) : '-?'}
     sub={strategyDisplay || 'Эта метка отнимает баллы. Не повезло.'}
     meta={meta || ''}
-    boardSlice={boardSlice || defaultBoardSlice(user)}
+    boardSlice={boardSlice}
     boardTimer={boardTimer || ''}
     boardTimerLabel={boardTimerLabel || 'до конца'}
     timerTarget={timerTarget}
@@ -468,7 +457,7 @@ function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
       hero={<IconLock />}
       sub="Эта метка уже использована."
       strategy="oneshot · стартовая"
-      boardSlice={boardSlice || defaultBoardSlice(user)}
+      boardSlice={boardSlice}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
       timerTarget={timerTarget}
@@ -543,7 +532,7 @@ function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLa
       strategy="итоговые результаты"
       boardTimerLabel={awardMessage ? 'награждение' : (boardTimerLabel || 'награждение')}
       boardTimer={boardTimer || '18:00'}
-      boardSlice={boardSlice || defaultBoardSlice(user)}
+      boardSlice={boardSlice}
       totalPlayers={totalPlayers}
     />
   );
@@ -562,7 +551,8 @@ function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLab
       sub="Метка не найдена в базе квеста."
       strategy="неизвестный tag_id"
       meta="возможно метка из другой игры"
-      boardSlice={boardSlice || defaultBoardSlice(user)}
+      boardSlice={boardSlice}
+      boardEmpty="Данные недоступны"
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
       timerTarget={timerTarget}
@@ -584,7 +574,7 @@ function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerL
       sub={getErrorMessage(message, 'Подождите секунду и попробуйте снова.')}
       strategy="rate limit · 1 скан / сек"
       meta="retry в течение ~ 0.6 сек"
-      boardSlice={boardSlice || defaultBoardSlice(user)}
+      boardSlice={boardSlice}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
       timerTarget={timerTarget}
@@ -734,6 +724,7 @@ function BoardRow({ place, name, score, mine }) {
         fontFamily: 'var(--font-mono)', fontSize: 14,
         color: mine ? 'var(--fg)' : 'var(--fg-2)',
         fontWeight: mine ? 600 : 400,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
       }}>{name}{mine && <span style={{ color: 'var(--accent)', marginLeft: 6, fontSize: 10 }}>· ВЫ</span>}</div>
       <div className="tabular" style={{
         fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 600,
