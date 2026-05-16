@@ -640,91 +640,162 @@ function ScreenAdminTags() {
           </div>
         </div>
 
-        {/* side — tag detail panel */}
-        <div style={{ borderLeft: '1px solid var(--line)', background: 'var(--bg-2)', padding: 20, display: 'flex', flexDirection: 'column', gap: 18, overflow: 'auto' }}>
-          {selectedTag ? (
-            <>
-              {/* header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div className="brak" style={{ fontSize: 11 }}>[ выбрано · {selectedTag.id} ]</div>
-                <span
-                  className="mono"
-                  style={{ fontSize: 10, color: 'var(--muted)', cursor: 'pointer' }}
-                  onClick={() => setSelectedTag(null)}
-                >esc</span>
-              </div>
-
-              {/* label */}
-              <div>
-                <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>label</div>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em' }}>
-                  {selectedTag.label || '—'}
-                </div>
-              </div>
-
-              {/* URL */}
-              <div>
-                <div className="brak" style={{ fontSize: 11, marginBottom: 4 }}>url</div>
-                <div className="mono" style={{ fontSize: 11, color: 'var(--fg-2)', wordBreak: 'break-all' }}>
-                  {window.location.origin}/tag/{selectedTag.id}
-                </div>
-              </div>
-
-              {/* data rows */}
-              <KVList items={[
-                ['стратегия', selectedTag.strategy || '—'],
-                ['параметры', (() => {
-                  const sp = selectedTag.strategy_params || {};
-                  if (selectedTag.strategy === 'fixed')    return `+${sp.points ?? '?'}`;
-                  if (selectedTag.strategy === 'penalty')  return `-${sp.points ?? '?'}`;
-                  if (selectedTag.strategy === 'random')   return `+${sp.min ?? sp.min_points ?? '?'}…+${sp.max ?? sp.max_points ?? '?'}`;
-                  if (selectedTag.strategy === 'oneshot')  return `+${sp.points ?? '?'}`;
-                  if (selectedTag.strategy === 'transfer') return `±${sp.points ?? '?'}`;
-                  return JSON.stringify(sp);
-                })()],
-                ['сканов', selectedTag.total_scans ?? selectedTag.scan_count ?? 0],
-                ['уникальных', selectedTag.unique_scans ?? selectedTag.unique_players_count ?? 0],
-                ['создана', selectedTag.created_at ? new Date(selectedTag.created_at).toLocaleString('ru-RU') : '—'],
-              ]} />
-
-              {/* Sparkline visual accent */}
-              <div>
-                <Sparkline />
-              </div>
-
-              {/* actions */}
-              <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-                <button
-                  className="btn ghost sm"
-                  style={{ flex: 1 }}
-                  onClick={() => { handleReset(selectedTag.id); setSelectedTag(null); }}
-                >Сброс</button>
-                <button
-                  className="btn sm"
-                  style={{ flex: 1, borderColor: 'var(--accent)', color: 'var(--accent)' }}
-                  onClick={() => { handleDelete(selectedTag.id); setSelectedTag(null); }}
-                >Удалить</button>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* placeholder when nothing is selected */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div className="brak" style={{ fontSize: 11 }}>выбрано · —</div>
-                <span className="mono" style={{ fontSize: 10, color: 'var(--muted)' }}>esc</span>
-              </div>
-              <div>
-                <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>label</div>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em', color: 'var(--muted)' }}>нажмите на метку</div>
-              </div>
-              <div>
-                <Sparkline />
-              </div>
-            </>
-          )}
-        </div>
+        {/* side — tag detail/edit panel */}
+        <TagDetailPanel
+          tag={selectedTag}
+          onClose={() => setSelectedTag(null)}
+          onReset={(id) => { handleReset(id); setSelectedTag(null); }}
+          onDelete={(id) => { handleDelete(id); setSelectedTag(null); }}
+          onSaved={(updatedTag) => { setSelectedTag(updatedTag); loadTags(); }}
+        />
       </div>
     </AdminShell>
+  );
+}
+
+function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
+  const [editing, setEditing] = React.useState(false);
+  const [editStrategy, setEditStrategy] = React.useState('');
+  const [editParams, setEditParams] = React.useState('');
+  const [editLabel, setEditLabel] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (tag) {
+      setEditing(false);
+      setEditStrategy(tag.strategy || '');
+      setEditLabel(tag.label || '');
+      const sp = tag.strategy_params || {};
+      if (tag.strategy === 'random') {
+        setEditParams(JSON.stringify({ min: sp.min ?? 0, max: sp.max ?? 0 }));
+      } else {
+        setEditParams(String(sp.points ?? 0));
+      }
+    }
+  }, [tag?.id]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    let strategy_params;
+    if (editStrategy === 'random') {
+      try { strategy_params = JSON.parse(editParams); } catch { strategy_params = { min: 0, max: 0 }; }
+    } else {
+      strategy_params = { points: parseInt(editParams) || 0 };
+    }
+    const res = await adminApi.updateTag(tag.id, {
+      strategy: editStrategy,
+      strategy_params,
+      label: editLabel || null,
+    });
+    setSaving(false);
+    if (res.ok) {
+      setEditing(false);
+      onSaved(res.data);
+    }
+  };
+
+  if (!tag) {
+    return (
+      <div style={{ borderLeft: '1px solid var(--line)', background: 'var(--bg-2)', padding: 20, display: 'flex', flexDirection: 'column', gap: 18, overflow: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="brak" style={{ fontSize: 11 }}>выбрано · —</div>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--muted)' }}>esc</span>
+        </div>
+        <div>
+          <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>label</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em', color: 'var(--muted)' }}>нажмите на метку</div>
+        </div>
+        <div><Sparkline /></div>
+      </div>
+    );
+  }
+
+  const sp = tag.strategy_params || {};
+  const paramsDisplay = (() => {
+    if (tag.strategy === 'fixed' || tag.strategy === 'unlimited') return `+${sp.points ?? '?'}`;
+    if (tag.strategy === 'penalty') return `-${sp.points ?? '?'}`;
+    if (tag.strategy === 'random') return `${sp.min ?? '?'}…${sp.max ?? '?'}`;
+    if (tag.strategy === 'oneshot' || tag.strategy === 'one_time_global') return `+${sp.points ?? '?'}`;
+    if (tag.strategy === 'one_time_per_player') return `+${sp.points ?? '?'}`;
+    return JSON.stringify(sp);
+  })();
+
+  return (
+    <div style={{ borderLeft: '1px solid var(--line)', background: 'var(--bg-2)', padding: 20, display: 'flex', flexDirection: 'column', gap: 18, overflow: 'auto' }}>
+      {/* header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="brak" style={{ fontSize: 11 }}>[ выбрано · {tag.id} ]</div>
+        <span className="mono" style={{ fontSize: 10, color: 'var(--muted)', cursor: 'pointer' }} onClick={onClose}>esc</span>
+      </div>
+
+      {editing ? (
+        <>
+          {/* edit mode */}
+          <Field label="label">
+            <input className="input" value={editLabel} onChange={e => setEditLabel(e.target.value)} placeholder="название метки" />
+          </Field>
+          <Field label="стратегия">
+            <select className="input" value={editStrategy} onChange={e => setEditStrategy(e.target.value)} style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+              <option value="unlimited">unlimited</option>
+              <option value="one_time_global">one_time_global</option>
+              <option value="one_time_per_player">one_time_per_player</option>
+              <option value="random">random</option>
+              <option value="fixed">fixed</option>
+              <option value="penalty">penalty</option>
+              <option value="oneshot">oneshot</option>
+            </select>
+          </Field>
+          <Field label={editStrategy === 'random' ? 'параметры (JSON: {"min": N, "max": M})' : 'баллы'}>
+            <input className="input" value={editParams} onChange={e => setEditParams(e.target.value)} />
+          </Field>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn ghost sm" style={{ flex: 1 }} onClick={() => setEditing(false)}>Отмена</button>
+            <button className="btn sm" style={{ flex: 1 }} onClick={handleSave} disabled={saving}>
+              {saving ? 'Сохраняем…' : 'Сохранить'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* view mode */}
+          <div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>label</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em' }}>
+              {tag.label || '—'}
+            </div>
+          </div>
+
+          <div>
+            <div className="brak" style={{ fontSize: 11, marginBottom: 4 }}>url</div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--fg-2)', wordBreak: 'break-all' }}>
+              {window.location.origin}/tag/{tag.id}
+            </div>
+          </div>
+
+          <KVList items={[
+            ['стратегия', tag.strategy || '—'],
+            ['параметры', paramsDisplay],
+            ['сканов', tag.total_scans ?? tag.scan_count ?? 0],
+            ['уникальных', tag.unique_scans ?? tag.unique_players_count ?? 0],
+            ['создана', tag.created_at ? new Date(tag.created_at).toLocaleString('ru-RU') : '—'],
+          ]} />
+
+          <div><Sparkline /></div>
+
+          {/* actions */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+            <button className="btn ghost sm" style={{ flex: 1 }} onClick={() => setEditing(true)}>Редактировать</button>
+            <button className="btn ghost sm" style={{ flex: 1 }} onClick={() => onReset(tag.id)}>Сброс</button>
+          </div>
+          <button
+            className="btn sm"
+            style={{ width: '100%', borderColor: 'var(--accent)', color: 'var(--accent)' }}
+            onClick={() => onDelete(tag.id)}
+          >Удалить</button>
+        </>
+      )}
+    </div>
   );
 }
 

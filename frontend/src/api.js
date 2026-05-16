@@ -83,6 +83,7 @@ export const adminApi = {
 
   getTags: (params = {}) => get('/admin/api/tags?' + new URLSearchParams(params)),
   createTagsBatch: (data) => post('/admin/api/tags/batch', data),
+  updateTag: (id, data) => put(`/admin/api/tags/${id}`, data),
   deleteTag: (id) => del(`/admin/api/tags/${id}`),
   resetTag: (id) => post(`/admin/api/tags/${id}/reset`, {}),
   deleteAllTags: () => del('/admin/api/tags'),

@@ -119,11 +119,13 @@ function ScreenHallScoreboard() {
               color: 'var(--fg)', marginTop: 8, whiteSpace: 'nowrap',
             }}>
               {timeLeft
-                ? <>
-                    {timeLeft.slice(0, 5)}
-                    <span style={{ color: 'var(--muted-2)' }}>:</span>
-                    <span style={{ color: 'var(--accent)' }}>{timeLeft.slice(6)}</span>
-                  </>
+                ? /^\d{2}:\d{2}:\d{2}$/.test(timeLeft)
+                  ? <>
+                      {timeLeft.slice(0, 5)}
+                      <span style={{ color: 'var(--muted-2)' }}>:</span>
+                      <span style={{ color: 'var(--accent)' }}>{timeLeft.slice(6)}</span>
+                    </>
+                  : <span style={{ color: 'var(--accent)', fontSize: 'clamp(40px, 10vw, 100px)', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 0.95 }}>{timeLeft}</span>
                 : <span style={{ color: 'var(--muted-2)' }}>--:--:--</span>
               }
             </div>
