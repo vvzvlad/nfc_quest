@@ -6,7 +6,7 @@ import { getErrorMessage } from './i18n.js';
 import {
   ScreenRegistration,
   ScanSuccessPlus, ScanSuccessMinus, ScanLocked, ScanNotYet,
-  ScanFinished, ScanUnknown, ScanRateLimit,
+  ScanFinished, ScanFinishedWinner, ScanUnknown, ScanRateLimit,
   ScreenScoreboardMobile,
 } from './screens/Player.jsx';
 import { ScreenHallScoreboard } from './screens/Hall.jsx';
@@ -257,7 +257,17 @@ function PlayerPage() {
     }
     if (status === 'locked')     return <ScanLocked   {...commonProps} />;
     if (status === 'not_yet')    return <ScanNotYet   {...commonProps} timerTarget={scanResult.starts_at} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
-    if (status === 'finished')   return <ScanFinished {...commonProps} awardMessage={scanResult.award_message} />;
+    // Find the current player's rank from the scoreboard (1-based, null if not found)
+    const myRank = scoreboardData?.players
+      ? (scoreboardData.players.findIndex(p => p.nick === myNick) + 1) || null
+      : null;
+    if (status === 'finished') {
+      // Show bright winner screen for top-10 players
+      if (myRank && myRank <= 10) {
+        return <ScanFinishedWinner user={myNick} score={liveScore} rank={myRank} />;
+      }
+      return <ScanFinished {...commonProps} awardMessage={scanResult.award_message} />;
+    }
     if (status === 'rate_limit') return <ScanRateLimit {...commonProps} message={scanResult.message} />;
     // Covers 'unknown' and any unexpected status values
     return <ScanUnknown {...commonProps} />;

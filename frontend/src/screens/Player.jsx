@@ -538,6 +538,48 @@ function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLa
   );
 }
 
+// State: quest finished — winner screen for top-10 players
+// Displays a bright fullscreen congratulation with the player's place number
+export function ScanFinishedWinner({ user, score, rank }) {
+  // Gold background for top 3, warm amber for places 4-10
+  const bgColor = rank <= 3 ? '#f6cd5b' : '#f0b429';
+  const placeStr = String(rank).padStart(2, '0');
+
+  return (
+    <div style={{
+      width: '100%', height: '100%',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: bgColor,
+    }}>
+      {/* Small "МЕСТО" label above the big number */}
+      <div style={{
+        fontFamily: 'var(--font-mono)', fontSize: 11,
+        letterSpacing: '0.15em', textTransform: 'uppercase',
+        color: 'rgba(0,0,0,0.5)', marginBottom: 8,
+      }}>МЕСТО</div>
+
+      {/* Giant place number */}
+      <div style={{
+        fontFamily: 'var(--font-display)', fontSize: 180, fontWeight: 800,
+        lineHeight: 1, letterSpacing: '-0.05em', color: '#0c0d0e',
+      }}>{placeStr}</div>
+
+      {/* Call-to-action message */}
+      <div style={{
+        fontFamily: 'var(--font-sans)', fontSize: 24, fontWeight: 700,
+        color: '#0c0d0e', marginTop: 16,
+      }}>Приходите на награждение</div>
+
+      {/* Nick and score in muted style */}
+      <div style={{
+        fontFamily: 'var(--font-mono)', fontSize: 13,
+        color: 'rgba(0,0,0,0.55)', marginTop: 12,
+      }}>{user} · {score} pts</div>
+    </div>
+  );
+}
+
 // State: unknown tag
 function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return (
@@ -738,6 +780,6 @@ export {
   QuestHeader, QuestFooter, CornerBrackets,
   ScanResultLayout, BoardRow, BoardSliceRow,
   ScreenRegistration,
-  ScanSuccessPlus, ScanSuccessMinus, ScanLocked, ScanNotYet, ScanFinished, ScanUnknown, ScanRateLimit,
+  ScanSuccessPlus, ScanSuccessMinus, ScanLocked, ScanNotYet, ScanFinished, ScanFinishedWinner, ScanUnknown, ScanRateLimit,
   ScreenScoreboardMobile,
 };
