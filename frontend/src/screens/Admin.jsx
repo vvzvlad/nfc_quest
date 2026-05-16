@@ -149,7 +149,7 @@ function AdminSidebar({ active }) {
         </div>
       </div>
 
-      <div className="brak" style={{ padding: '6px 8px' }}>конференция</div>
+      <div className="brak" style={{ padding: '6px 8px' }}>квест</div>
 
       {sections.map(s => (
         <div key={s.id}
@@ -369,7 +369,7 @@ function ScreenAdminGame() {
   return (
     <AdminShell
       section="game"
-      breadcrumb={['Конференция', 'Управление игрой']}
+      breadcrumb={['квест', 'Управление игрой']}
       actions={<>
         {saved && <span className="mono" style={{ fontSize: 11, color: 'var(--success)' }}>сохранено ✓</span>}
         <button className="btn sm" onClick={handleSave} disabled={loading}>
@@ -577,7 +577,7 @@ function ScreenAdminTags() {
   return (
     <AdminShell
       section="tags"
-      breadcrumb={['Конференция', 'Метки']}
+      breadcrumb={['квест', 'Метки']}
       actions={<>
         <button className="btn ghost sm" disabled={exportingTags} onClick={() => {
           setExportingTags(true);
@@ -877,7 +877,7 @@ function ScreenAdminTagsCreate({ onBack }) {
   return (
     <AdminShell
       section="tags"
-      breadcrumb={['Конференция', 'Метки', 'Создание']}
+      breadcrumb={['квест', 'Метки', 'Создание']}
       actions={<>
         <button className="btn ghost sm" onClick={onBack}>← Назад к таблице</button>
         {!created && <button className="btn sm" onClick={handleCreate} disabled={loading}>{loading ? 'Создаём…' : `+ ещё пачка`}</button>}
@@ -1123,7 +1123,7 @@ function ScreenAdminPlayers() {
   return (
     <AdminShell
       section="players"
-      breadcrumb={['Конференция', 'Участники']}
+      breadcrumb={['квест', 'Участники']}
       actions={<>
         <button className="btn ghost sm" disabled={exportingPlayers} onClick={() => {
           setExportingPlayers(true);
@@ -1247,7 +1247,7 @@ function ScreenAdminLog() {
   return (
     <AdminShell
       section="log"
-      breadcrumb={['Конференция', 'Лог событий']}
+      breadcrumb={['квест', 'Лог событий']}
       actions={<>
         <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
           <span className="live-dot" style={{ marginRight: 8, transform: 'translateY(-1px)' }}/>

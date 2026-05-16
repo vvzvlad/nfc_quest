@@ -1,5 +1,7 @@
+import re
+import unicodedata
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from models import db, Player, Tag, ScanEvent, GameSettings, TagPlayerScan
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
@@ -46,6 +48,22 @@ def register():
 
     if not player_id or not nick:
         return jsonify({"error": "MISSING_FIELDS"}), 400
+
+    # Validate player_id is a well-formed UUID
+    _UUID_RE = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
+    if not _UUID_RE.match(player_id):
+        return jsonify({"error": "INVALID_PLAYER_ID"}), 400
+
+    # Reject nicks that are too long for the DB column
+    if len(nick) > 64:
+        return jsonify({"error": "NICK_TOO_LONG"}), 400
+
+    # Reject nicks containing control characters (codepoints 0–31)
+    if any(unicodedata.category(c) == "Cc" for c in nick):
+        return jsonify({"error": "INVALID_NICK"}), 400
 
     # Block registration if the game has already ended
     settings = db.session.get(GameSettings, 1)
@@ -181,7 +199,7 @@ def scan():
     else:
         strategy_display = f"hidden · {tag.strategy} {sign}{delta}"
 
-    meta = f"{points_before} → {points_after}  ·  место #{rank_before} → #{rank_after}"
+    meta = f"{points_before} → {points_after}  ·  rank #{rank_before} → #{rank_after}"
 
     # Broadcast updated scoreboard to all WebSocket clients
     broadcast_scoreboard()
@@ -253,3 +271,9 @@ def scoreboard():
         },
         "recent_scans": recent_scans_data,
     }), 200
+
+
+@game_api.route("/config", methods=["GET"])
+def config():
+    """Return public configuration for the frontend."""
+    return jsonify({"quest_name": current_app.config["QUEST_NAME"]}), 200

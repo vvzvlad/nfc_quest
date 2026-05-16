@@ -63,6 +63,7 @@ export const api = {
   register: (player_id, nick) => post('/api/register', { player_id, nick }),
   scan: (tag_id, player_id) => post('/api/scan', { tag_id, player_id }),
   scoreboard: () => get('/api/scoreboard'),
+  config: () => get('/api/config'),
 };
 
 // ─── Admin API ─────────────────────────────────────────────────────────────

@@ -285,7 +285,13 @@ function RequireAuth() {
 // ─── App (root router) ────────────────────────────────────────────────────────
 
 export default function App() {
-  const [quest] = React.useState('ПЕРИМЕТР');
+  const [quest, setQuest] = React.useState('');
+  React.useEffect(() => {
+    // Load quest name from backend config on mount; fall back to default if request fails
+    api.config()
+      .then(r => { if (r.ok && r.data?.quest_name) setQuest(r.data.quest_name); })
+      .catch(() => setQuest('ПЕРИМЕТР'));
+  }, []);
   return (
     <QuestCtx.Provider value={quest}>
       <Routes>

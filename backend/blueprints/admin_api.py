@@ -50,20 +50,20 @@ def _check_login_rate_limit() -> bool:
 
 @admin_api.route("/login", methods=["POST"])
 def login():
-    if _check_login_rate_limit():
-        return jsonify({"error": "LOGIN_RATE_LIMIT"}), 429
-
     data = request.get_json(silent=True) or {}
     password = data.get("password", "")
-
     ip = request.remote_addr or "unknown"
     now = datetime.now(timezone.utc)
 
+    # Correct password always succeeds — clears any pending failures
     if password == current_app.config["ADMIN_PASSWORD"]:
         _login_attempts.pop(ip, None)
         session["admin"] = True
         return jsonify({"ok": True}), 200
 
+    # Wrong password: check rate limit THEN record failure
+    if _check_login_rate_limit():
+        return jsonify({"error": "LOGIN_RATE_LIMIT"}), 429
     _login_attempts.setdefault(ip, []).append(now)
     return jsonify({"error": "WRONG_PASSWORD"}), 401
 
