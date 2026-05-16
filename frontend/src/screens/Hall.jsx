@@ -125,7 +125,7 @@ function ScreenHallScoreboard() {
                       <span style={{ color: 'var(--muted-2)' }}>:</span>
                       <span style={{ color: 'var(--accent)' }}>{timeLeft.slice(6)}</span>
                     </>
-                  : <span style={{ color: 'var(--accent)', fontSize: 'clamp(40px, 10vw, 100px)', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 0.95 }}>{timeLeft}</span>
+                  : <span style={{ color: 'var(--accent)', fontSize: 100, whiteSpace: 'normal', lineHeight: 0.95 }}>{timeLeft}</span>
                 : <span style={{ color: 'var(--muted-2)' }}>--:--:--</span>
               }
             </div>
