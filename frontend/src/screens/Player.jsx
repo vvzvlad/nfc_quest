@@ -134,7 +134,7 @@ function ScanResultLayout({
   user, score, tagId, strategy, tone = 'accent',
   hero, sub, meta, scanLabel = 'scan · ok', wideHero = false,
   boardTimerLabel = 'до конца', boardTimer = '02:13:08',
-  boardSlice, boardEmpty,
+  boardSlice, boardEmpty, totalPlayers,
 }) {
   const tones = {
     plus:    { color: 'var(--success)' },
@@ -246,14 +246,15 @@ function ScanResultLayout({
         </div>
       </div>
 
-      <QuestFooter>
-        <button className="btn ghost">Полное табло · {QUEST_TOTAL_PLAYERS} участников →</button>
-      </QuestFooter>
+      {totalPlayers != null && (
+        <QuestFooter>
+          <button className="btn ghost">Полное табло · {totalPlayers} участников →</button>
+        </QuestFooter>
+      )}
     </div>
   );
 }
 
-const QUEST_TOTAL_PLAYERS = 48;
 
 function BoardSliceRow({ place, name, score, mine, delta, prevPlace, dim }) {
   const medal = place === 1 ? 'var(--gold)' : place === 2 ? 'var(--silver)' : place === 3 ? 'var(--bronze)' : null;
@@ -349,7 +350,7 @@ function defaultBoardSlice(myNick) {
 // centered on the player's row, so the table is right there.
 
 // State: ok (positive delta)
-function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel }) {
+function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
   return <ScanResultLayout
     user={user || 'r00t_kit'}
     score={score != null ? score : 310}
@@ -362,11 +363,12 @@ function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boa
     boardSlice={boardSlice || defaultBoardSlice(user)}
     boardTimer={boardTimer || ''}
     boardTimerLabel={boardTimerLabel || 'до конца'}
+    totalPlayers={totalPlayers}
   />;
 }
 
 // State: ok (negative delta)
-function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel }) {
+function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
   return <ScanResultLayout
     user={user || 'r00t_kit'}
     score={score != null ? score : 210}
@@ -379,11 +381,12 @@ function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, bo
     boardSlice={boardSlice || defaultBoardSlice(user)}
     boardTimer={boardTimer || ''}
     boardTimerLabel={boardTimerLabel || 'до конца'}
+    totalPlayers={totalPlayers}
   />;
 }
 
 // State: locked (tag already used)
-function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel }) {
+function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -397,27 +400,14 @@ function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
       boardSlice={boardSlice || defaultBoardSlice(user)}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
+      totalPlayers={totalPlayers}
     />
   );
 }
 
 // State: quest not started yet (countdown)
 // startsAt — ISO string of when the quest begins
-// registeredCount — number of registered players so far
-function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, startsAt, registeredCount }) {
-  // Build a human-readable start time hint
-  let startHint = 'Сканирование откроется — участников уже зарегистрированы.';
-  if (startsAt || registeredCount != null) {
-    const timeStr = startsAt
-      ? new Date(startsAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-      : null;
-    const countStr = registeredCount != null ? `${registeredCount} участников` : '';
-    startHint = [
-      timeStr ? `Сканирование откроется в ${timeStr}` : 'Сканирование откроется позже',
-      countStr ? `${countStr} уже зарегистрированы.` : '',
-    ].filter(Boolean).join(' — ');
-  }
-
+function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, startsAt, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -426,26 +416,40 @@ function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
       tone="info"
       scanLabel="quest · pending"
       wideHero
-      hero={<CountdownBig />}
-      sub="Квест ещё не начался. Регистрация уже открыта."
+      hero={<CountdownBig startsAt={startsAt} />}
+      sub="Квест ещё не начался."
       strategy="ожидание · старт через"
       boardTimerLabel={boardTimerLabel || 'до старта'}
       boardTimer={boardTimer || ''}
-      boardEmpty={startHint}
+      boardEmpty="Сканирование ещё не открыто."
+      totalPlayers={totalPlayers}
     />
   );
 }
 
-function CountdownBig() {
+// Live countdown to startsAt (or static "—" if no date provided)
+function CountdownBig({ startsAt }) {
+  const [timeStr, setTimeStr] = React.useState('');
+  React.useEffect(() => {
+    const tick = () => {
+      if (!startsAt) { setTimeStr('—'); return; }
+      const diff = Math.max(0, new Date(startsAt).getTime() - Date.now());
+      const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
+      const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+      const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+      setTimeStr(`${h}:${m}:${s}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [startsAt]);
   return (
     <div style={{
       display: 'flex', alignItems: 'baseline', gap: 4,
       fontSize: 84, lineHeight: 0.85, fontFamily: 'var(--font-display)',
       fontWeight: 800, letterSpacing: '-0.04em', whiteSpace: 'nowrap',
     }}>
-      <span>00</span><Sep />
-      <span>12</span><Sep />
-      <span>47</span>
+      {timeStr}
     </div>
   );
 }
@@ -453,7 +457,7 @@ function Sep() { return <span style={{ color: 'var(--muted-2)' }}>:</span>; }
 
 // State: quest finished
 // awardMessage — string with award ceremony info
-function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, awardMessage }) {
+function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, awardMessage, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -467,12 +471,13 @@ function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLa
       boardTimerLabel={awardMessage ? 'награждение' : (boardTimerLabel || 'награждение')}
       boardTimer={boardTimer || '18:00'}
       boardSlice={boardSlice || defaultBoardSlice(user)}
+      totalPlayers={totalPlayers}
     />
   );
 }
 
 // State: unknown tag
-function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel }) {
+function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -487,12 +492,13 @@ function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLab
       boardSlice={boardSlice || defaultBoardSlice(user)}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
+      totalPlayers={totalPlayers}
     />
   );
 }
 
 // State: rate-limited
-function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel }) {
+function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -507,6 +513,7 @@ function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerL
       boardSlice={boardSlice || defaultBoardSlice(user)}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
+      totalPlayers={totalPlayers}
     />
   );
 }

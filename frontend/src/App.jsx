@@ -192,7 +192,10 @@ function PlayerPage() {
           return `${h}:${m}:${s}`;
         })()
       : '';
-    const commonProps = { user: myNick, score: player?.points, tagId, boardSlice, boardTimer };
+    const commonProps = {
+      user: myNick, score: player?.points, tagId, boardSlice, boardTimer,
+      totalPlayers: scoreboardData?.stats?.total_players,  // pass total player count to result screens
+    };
 
     if (status === 'ok') {
       // Props shared between plus and minus success screens
@@ -204,6 +207,7 @@ function PlayerPage() {
         strategyDisplay: scanResult.strategy_display,
         boardSlice,
         boardTimer,
+        totalPlayers: scoreboardData?.stats?.total_players,  // pass total player count to result screens
       };
       return delta >= 0
         ? <ScanSuccessPlus  {...commonScanProps} />
