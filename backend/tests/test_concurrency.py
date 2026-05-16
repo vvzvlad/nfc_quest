@@ -3,7 +3,7 @@ Concurrency tests: race conditions in one_time_global, one_time_per_player, and 
 """
 import threading
 
-from helpers import start_game, create_tag, register_player, scan_tag
+from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
 from blueprints.game_api import rate_limiter
 
 
@@ -14,8 +14,8 @@ class TestConcurrentOneTimeGlobal:
         tags = create_tag(admin_client, "one_time_global", {"points": 100})
         tag_id = tags[0]["id"]
 
-        register_player(client, "player-conc-a", "ConcPlayerA")
-        register_player(client, "player-conc-b", "ConcPlayerB")
+        register_player(client, make_player_id("player-conc-a"), "ConcPlayerA")
+        register_player(client, make_player_id("player-conc-b"), "ConcPlayerB")
 
         results = []
 
@@ -25,8 +25,8 @@ class TestConcurrentOneTimeGlobal:
                 results.append(r.get_json())
 
         rate_limiter.clear()
-        t1 = threading.Thread(target=do_scan, args=("player-conc-a",))
-        t2 = threading.Thread(target=do_scan, args=("player-conc-b",))
+        t1 = threading.Thread(target=do_scan, args=(make_player_id("player-conc-a"),))
+        t2 = threading.Thread(target=do_scan, args=(make_player_id("player-conc-b"),))
         t1.start()
         t2.start()
         t1.join()
@@ -47,8 +47,8 @@ class TestConcurrentRegistration:
                 r = c.post("/api/register", json={"player_id": player_id, "nick": "SameNick"})
                 results.append(r.status_code)
 
-        t1 = threading.Thread(target=do_register, args=("uuid-race-1",))
-        t2 = threading.Thread(target=do_register, args=("uuid-race-2",))
+        t1 = threading.Thread(target=do_register, args=(make_player_id("uuid-race-1"),))
+        t2 = threading.Thread(target=do_register, args=(make_player_id("uuid-race-2"),))
         t1.start()
         t2.start()
         t1.join()
@@ -68,7 +68,7 @@ class TestConcurrentUnlimited:
 
         num_players = 20
         for i in range(num_players):
-            register_player(client, f"player-unlim-{i}", f"UnlimPlayer{i}")
+            register_player(client, make_player_id(f"player-unlim-{i}"), f"UnlimPlayer{i}")
 
         results = []
 
@@ -79,7 +79,7 @@ class TestConcurrentUnlimited:
 
         rate_limiter.clear()
         threads = [
-            threading.Thread(target=do_scan, args=(f"player-unlim-{i}",))
+            threading.Thread(target=do_scan, args=(make_player_id(f"player-unlim-{i}"),))
             for i in range(num_players)
         ]
         for t in threads:
@@ -108,13 +108,13 @@ class TestConcurrentOneTimePerPlayer:
         start_game(admin_client)
         tags = create_tag(admin_client, "one_time_per_player", {"points": 50})
         tag_id = tags[0]["id"]
-        register_player(client, "player-par-otp", "ParOTP")
+        register_player(client, make_player_id("player-par-otp"), "ParOTP")
 
         results = []
 
         def do_scan():
             with app.test_client() as c:
-                r = scan_tag(c, "player-par-otp", tag_id)
+                r = scan_tag(c, make_player_id("player-par-otp"), tag_id)
                 results.append(r.get_json())
 
         rate_limiter.clear()

@@ -4,7 +4,7 @@ Block G: Admin API tests.
 import re
 import pytest
 from datetime import datetime, timezone, timedelta
-from helpers import start_game, create_tag, register_player, scan_tag
+from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
 from blueprints.game_api import rate_limiter
 
 TAG_ID_PATTERN = re.compile(r'^[0-9A-F]{4}-[0-9A-F]{3}$')
@@ -167,12 +167,12 @@ class TestAdminTags:
     # G-M4: Deleting all tags does NOT erase players' accumulated points
     def test_delete_all_tags_preserves_player_points(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-gm4", "PlayerGM4")
+        register_player(client, make_player_id("player-gm4"), "PlayerGM4")
         tags = create_tag(admin_client, "unlimited", {"points": 25})
         tag_id = tags[0]["id"]
 
         # Player scans and earns 25 points
-        r_scan = scan_tag(client, "player-gm4", tag_id)
+        r_scan = scan_tag(client, make_player_id("player-gm4"), tag_id)
         assert r_scan.get_json()["status"] == "ok"
 
         # Delete all tags
@@ -195,11 +195,11 @@ class TestAdminTags:
         start_game(admin_client)
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
-        register_player(client, "player-gm10", "PlayerGM10")
+        register_player(client, make_player_id("player-gm10"), "PlayerGM10")
 
         # Scan with original params → 10 points
         rate_limiter.clear()
-        r1 = scan_tag(client, "player-gm10", tag_id)
+        r1 = scan_tag(client, make_player_id("player-gm10"), tag_id)
         assert r1.get_json()["delta"] == 10
 
         # Admin updates tag to 99 points
@@ -212,7 +212,7 @@ class TestAdminTags:
 
         # Scan again → 99 points
         rate_limiter.clear()
-        r2 = scan_tag(client, "player-gm10", tag_id)
+        r2 = scan_tag(client, make_player_id("player-gm10"), tag_id)
         assert r2.get_json()["delta"] == 99
 
     # G-M11: Edit tag strategy (change from unlimited to one_time_per_player)
@@ -220,14 +220,14 @@ class TestAdminTags:
         start_game(admin_client)
         tags = create_tag(admin_client, "unlimited", {"points": 20})
         tag_id = tags[0]["id"]
-        register_player(client, "player-gm11", "PlayerGM11")
+        register_player(client, make_player_id("player-gm11"), "PlayerGM11")
 
         # Scan unlimited tag twice — both succeed
         rate_limiter.clear()
-        r1 = scan_tag(client, "player-gm11", tag_id)
+        r1 = scan_tag(client, make_player_id("player-gm11"), tag_id)
         assert r1.get_json()["status"] == "ok"
         rate_limiter.clear()
-        r2 = scan_tag(client, "player-gm11", tag_id)
+        r2 = scan_tag(client, make_player_id("player-gm11"), tag_id)
         assert r2.get_json()["status"] == "ok"
 
         # Admin changes strategy to one_time_per_player
@@ -242,11 +242,11 @@ class TestAdminTags:
         # Actually TagPlayerScan doesn't have a record yet since previous scans were unlimited.
         # So first scan after strategy change should succeed, second should lock.)
         rate_limiter.clear()
-        r3 = scan_tag(client, "player-gm11", tag_id)
+        r3 = scan_tag(client, make_player_id("player-gm11"), tag_id)
         assert r3.get_json()["status"] == "ok"
 
         rate_limiter.clear()
-        r4 = scan_tag(client, "player-gm11", tag_id)
+        r4 = scan_tag(client, make_player_id("player-gm11"), tag_id)
         assert r4.get_json()["status"] == "locked"
 
     # G-M12: Edit nonexistent tag returns 404
@@ -267,18 +267,18 @@ class TestAdminTags:
     # G-M7: Resetting a tag allows a player to scan it again after being locked
     def test_reset_tag_allows_rescan(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-gm7", "PlayerGM7")
+        register_player(client, make_player_id("player-gm7"), "PlayerGM7")
         tags = create_tag(admin_client, "one_time_per_player", {"points": 20})
         tag_id = tags[0]["id"]
 
         # First scan succeeds
         rate_limiter.clear()
-        r1 = scan_tag(client, "player-gm7", tag_id)
+        r1 = scan_tag(client, make_player_id("player-gm7"), tag_id)
         assert r1.get_json()["status"] == "ok"
 
         # Second scan is locked
         rate_limiter.clear()
-        r2 = scan_tag(client, "player-gm7", tag_id)
+        r2 = scan_tag(client, make_player_id("player-gm7"), tag_id)
         assert r2.get_json()["status"] == "locked"
 
         # Reset the tag via admin API
@@ -288,7 +288,7 @@ class TestAdminTags:
 
         # After reset, the player can scan again
         rate_limiter.clear()
-        r3 = scan_tag(client, "player-gm7", tag_id)
+        r3 = scan_tag(client, make_player_id("player-gm7"), tag_id)
         assert r3.get_json()["status"] == "ok"
 
     # G-M8: Batch creating 0 tags returns 201 with empty items list
@@ -311,9 +311,9 @@ class TestAdminTags:
         tag_id = r_batch.get_json()["items"][0]["id"]
 
         start_game(admin_client)
-        register_player(client, "player-gm9", "PlayerGM9")
+        register_player(client, make_player_id("player-gm9"), "PlayerGM9")
 
-        r = scan_tag(client, "player-gm9", tag_id)
+        r = scan_tag(client, make_player_id("player-gm9"), tag_id)
         assert r.status_code == 200
         assert r.get_json()["status"] == "unknown"
 
@@ -323,12 +323,12 @@ class TestAdminPlayers:
     def test_delete_all_players_resets_blocked_tags(self, client, admin_client):
         # Start the game, register a player, create a one_time_global tag
         start_game(admin_client)
-        register_player(client, "player-g5", "PlayerG5")
+        register_player(client, make_player_id("player-g5"), "PlayerG5")
         tags = create_tag(admin_client, "one_time_global", {"points": 50})
         tag_id = tags[0]["id"]
 
         # Player scans the tag — tag becomes blocked
-        r_scan = scan_tag(client, "player-g5", tag_id)
+        r_scan = scan_tag(client, make_player_id("player-g5"), tag_id)
         assert r_scan.get_json()["status"] == "ok"
 
         # Delete all players — should also reset tag blocked state
@@ -346,40 +346,40 @@ class TestAdminPlayers:
 
         # Register a new player and scan the tag — should succeed
         rate_limiter.clear()
-        register_player(client, "player-g5-new", "PlayerG5New")
-        r_scan2 = scan_tag(client, "player-g5-new", tag_id)
+        register_player(client, make_player_id("player-g5-new"), "PlayerG5New")
+        r_scan2 = scan_tag(client, make_player_id("player-g5-new"), tag_id)
         assert r_scan2.status_code == 200
         assert r_scan2.get_json()["status"] == "ok"
 
     # G6: Adjust player points including negative and invalid delta
     def test_admin_adjust_player_points(self, client, admin_client):
         # Register a player (starts at 0 points)
-        register_player(client, "player-g6", "PlayerG6")
+        register_player(client, make_player_id("player-g6"), "PlayerG6")
 
         # Adjust +50
         r1 = admin_client.post(
-            "/admin/api/players/player-g6/adjust", json={"delta": 50}
+            f"/admin/api/players/{make_player_id('player-g6')}/adjust", json={"delta": 50}
         )
         assert r1.status_code == 200
         assert r1.get_json()["points"] == 50
 
         # Adjust -30 → should be 20
         r2 = admin_client.post(
-            "/admin/api/players/player-g6/adjust", json={"delta": -30}
+            f"/admin/api/players/{make_player_id('player-g6')}/adjust", json={"delta": -30}
         )
         assert r2.status_code == 200
         assert r2.get_json()["points"] == 20
 
         # Adjust -30 again → should be -10 (negatives are allowed)
         r3 = admin_client.post(
-            "/admin/api/players/player-g6/adjust", json={"delta": -30}
+            f"/admin/api/players/{make_player_id('player-g6')}/adjust", json={"delta": -30}
         )
         assert r3.status_code == 200
         assert r3.get_json()["points"] == -10
 
         # Non-numeric delta → 400
         r4 = admin_client.post(
-            "/admin/api/players/player-g6/adjust", json={"delta": "abc"}
+            f"/admin/api/players/{make_player_id('player-g6')}/adjust", json={"delta": "abc"}
         )
         assert r4.status_code == 400
         assert r4.get_json()["error"] == "INVALID_DELTA"
@@ -402,14 +402,14 @@ class TestAdminScanLog:
     # G7: Scan log records scans in descending order with correct fields and filters
     def test_admin_scan_log(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-g7", "PlayerG7")
+        register_player(client, make_player_id("player-g7"), "PlayerG7")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
         # Perform 3 scans
         for _ in range(3):
             rate_limiter.clear()
-            scan_tag(client, "player-g7", tag_id)
+            scan_tag(client, make_player_id("player-g7"), tag_id)
 
         # GET log — should contain 3 records
         r_log = admin_client.get("/admin/api/log")
@@ -438,7 +438,7 @@ class TestAdminScanLog:
         assert sorted(totals) == [10, 20, 30]
 
         # Filter by player_id — should only return this player's events
-        r_filtered = admin_client.get(f"/admin/api/log?player_id=player-g7")
+        r_filtered = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-g7')}")
         filtered_body = r_filtered.get_json()
         for item in filtered_body["items"]:
             assert item["player_nick"] == "PlayerG7"
@@ -452,7 +452,7 @@ class TestAdminScanLog:
     def test_admin_scan_log_mixed_deltas(self, client, admin_client):
         """Verify player_total_after is a running cumulative sum even with mixed-sign deltas."""
         start_game(admin_client)
-        register_player(client, "player-g7b", "PlayerG7B")
+        register_player(client, make_player_id("player-g7b"), "PlayerG7B")
 
         # Create two tags: one positive, one negative
         tags_pos = create_tag(admin_client, "unlimited", {"points": 20})
@@ -462,14 +462,14 @@ class TestAdminScanLog:
 
         # Scan positive tag: total should be 20
         rate_limiter.clear()
-        scan_tag(client, "player-g7b", tag_pos_id)
+        scan_tag(client, make_player_id("player-g7b"), tag_pos_id)
 
         # Scan negative tag: total should be 15
         rate_limiter.clear()
-        scan_tag(client, "player-g7b", tag_neg_id)
+        scan_tag(client, make_player_id("player-g7b"), tag_neg_id)
 
         # Get log filtered to this player
-        r_log = admin_client.get("/admin/api/log?player_id=player-g7b")
+        r_log = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-g7b')}")
         items = r_log.get_json()["items"]
         ok_items = [i for i in items if i["result"] == "ok"]
         assert len(ok_items) == 2
@@ -482,27 +482,27 @@ class TestAdminScanLog:
         """Log entries carry the correct player_nick while the player exists;
         deleting a player preserves their scan events with player_id=null and player_nick='<deleted>'."""
         start_game(admin_client)
-        register_player(client, "player-g7c", "PlayerG7C")
+        register_player(client, make_player_id("player-g7c"), "PlayerG7C")
         tags = create_tag(admin_client, "unlimited", {"points": 5})
         tag_id = tags[0]["id"]
 
         # Player scans the tag
         rate_limiter.clear()
-        scan_tag(client, "player-g7c", tag_id)
+        scan_tag(client, make_player_id("player-g7c"), tag_id)
 
         # While the player exists, player_nick should equal the registered nick
-        r_log = admin_client.get("/admin/api/log?player_id=player-g7c")
+        r_log = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-g7c')}")
         items = r_log.get_json()["items"]
         ok_items = [i for i in items if i["result"] == "ok"]
         assert len(ok_items) >= 1
         assert ok_items[0]["player_nick"] == "PlayerG7C"
 
         # Delete the player — scan events are preserved with player_id=null
-        r_del = admin_client.delete("/admin/api/players/player-g7c")
+        r_del = admin_client.delete(f"/admin/api/players/{make_player_id('player-g7c')}")
         assert r_del.status_code == 200
 
         # Filtering by the old player_id returns empty (player_id is now null)
-        r_log_after = admin_client.get("/admin/api/log?player_id=player-g7c")
+        r_log_after = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-g7c')}")
         assert r_log_after.get_json()["items"] == []
 
         # But the overall log still contains the orphaned event with player_id=null and nick="<deleted>"
@@ -515,12 +515,12 @@ class TestAdminScanLog:
     def test_delete_tag_preserves_scan_log(self, client, admin_client):
         """Deleting a tag preserves scan events with tag_id=null."""
         start_game(admin_client)
-        register_player(client, "player-del-tag", "PlayerDelTag")
+        register_player(client, make_player_id("player-del-tag"), "PlayerDelTag")
         tags = create_tag(admin_client, "unlimited", {"points": 7})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
-        scan_tag(client, "player-del-tag", tag_id)
+        scan_tag(client, make_player_id("player-del-tag"), tag_id)
 
         # Verify scan event exists before deletion
         r_before = admin_client.get(f"/admin/api/log?tag_id={tag_id}")
@@ -543,15 +543,15 @@ class TestAdminScanLog:
     def test_delete_all_players_preserves_scan_log(self, client, admin_client):
         """Bulk-deleting all players preserves scan events with player_id=null."""
         start_game(admin_client)
-        register_player(client, "player-bulk-del-1", "BulkDel1")
+        register_player(client, make_player_id("player-bulk-del-1"), "BulkDel1")
         tags = create_tag(admin_client, "unlimited", {"points": 8})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
-        scan_tag(client, "player-bulk-del-1", tag_id)
+        scan_tag(client, make_player_id("player-bulk-del-1"), tag_id)
 
         # Verify scan event exists before deletion
-        r_before = admin_client.get("/admin/api/log?player_id=player-bulk-del-1")
+        r_before = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-bulk-del-1')}")
         assert len(r_before.get_json()["items"]) >= 1
 
         # Bulk-delete all players — scan events must be preserved
@@ -559,7 +559,7 @@ class TestAdminScanLog:
         assert r_del.status_code == 200
 
         # Filtering by old player_id returns empty (player_id is now null)
-        r_log_after = admin_client.get("/admin/api/log?player_id=player-bulk-del-1")
+        r_log_after = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-bulk-del-1')}")
         assert r_log_after.get_json()["items"] == []
 
         # Overall log still contains the orphaned event with player_id=null
@@ -572,12 +572,12 @@ class TestAdminScanLog:
     def test_delete_all_tags_preserves_scan_log(self, client, admin_client):
         """Bulk-deleting all tags preserves scan events with tag_id=null."""
         start_game(admin_client)
-        register_player(client, "player-bulk-tag-del", "BulkTagDel")
+        register_player(client, make_player_id("player-bulk-tag-del"), "BulkTagDel")
         tags = create_tag(admin_client, "unlimited", {"points": 9})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
-        scan_tag(client, "player-bulk-tag-del", tag_id)
+        scan_tag(client, make_player_id("player-bulk-tag-del"), tag_id)
 
         # Verify scan event exists before deletion
         r_before = admin_client.get(f"/admin/api/log?tag_id={tag_id}")
@@ -667,16 +667,16 @@ class TestAdminScanLogExtra:
             "/admin/api/game",
             json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
         )
-        register_player(client, "player-lm1", "PlayerLM1")
+        register_player(client, make_player_id("player-lm1"), "PlayerLM1")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
-        r_not_yet = scan_tag(client, "player-lm1", tag_id)
+        r_not_yet = scan_tag(client, make_player_id("player-lm1"), tag_id)
         assert r_not_yet.get_json()["status"] == "not_yet"
 
         # Log should have 0 entries (not_yet never records an event)
-        r_log_ny = admin_client.get(f"/admin/api/log?player_id=player-lm1")
+        r_log_ny = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-lm1')}")
         assert r_log_ny.get_json()["items"] == []
 
         # --- Sub-case: scan when game has already finished ---
@@ -685,25 +685,25 @@ class TestAdminScanLogExtra:
             json={"starts_at": "2000-01-01T00:00:00Z", "ends_at": "2000-06-01T00:00:00Z"},
         )
         rate_limiter.clear()
-        r_finished = scan_tag(client, "player-lm1", tag_id)
+        r_finished = scan_tag(client, make_player_id("player-lm1"), tag_id)
         assert r_finished.get_json()["status"] == "finished"
 
         # Log should still have 0 entries
-        r_log_fin = admin_client.get(f"/admin/api/log?player_id=player-lm1")
+        r_log_fin = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-lm1')}")
         assert r_log_fin.get_json()["items"] == []
 
         # --- Sub-case: rate-limited second scan (only first ok scan should be logged) ---
         # Start game and do two rapid scans; only the first should appear in log
         admin_client.post("/admin/api/game/start")
         rate_limiter.clear()
-        r1 = scan_tag(client, "player-lm1", tag_id)
+        r1 = scan_tag(client, make_player_id("player-lm1"), tag_id)
         assert r1.get_json()["status"] == "ok"
 
         # Second scan — rate limited, must NOT create a log entry
-        r2 = scan_tag(client, "player-lm1", tag_id)
+        r2 = scan_tag(client, make_player_id("player-lm1"), tag_id)
         assert r2.status_code == 429
 
-        r_log_rl = admin_client.get(f"/admin/api/log?player_id=player-lm1")
+        r_log_rl = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-lm1')}")
         ok_items = [i for i in r_log_rl.get_json()["items"] if i["result"] == "ok"]
         # Only the first scan should be in the log
         assert len(ok_items) == 1
@@ -711,8 +711,8 @@ class TestAdminScanLogExtra:
     # L-M2: Log can be filtered by tag_id
     def test_log_filter_by_tag_id(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-lm2a", "PlayerLM2A")
-        register_player(client, "player-lm2b", "PlayerLM2B")
+        register_player(client, make_player_id("player-lm2a"), "PlayerLM2A")
+        register_player(client, make_player_id("player-lm2b"), "PlayerLM2B")
 
         tags1 = create_tag(admin_client, "unlimited", {"points": 10})
         tags2 = create_tag(admin_client, "unlimited", {"points": 20})
@@ -721,11 +721,11 @@ class TestAdminScanLogExtra:
 
         # Player A scans tag1
         rate_limiter.clear()
-        scan_tag(client, "player-lm2a", tag1_id)
+        scan_tag(client, make_player_id("player-lm2a"), tag1_id)
 
         # Player B scans tag2
         rate_limiter.clear()
-        scan_tag(client, "player-lm2b", tag2_id)
+        scan_tag(client, make_player_id("player-lm2b"), tag2_id)
 
         # Filter log by tag1 — only player A's scan should appear
         r_log = admin_client.get(f"/admin/api/log?tag_id={tag1_id}")
@@ -737,29 +737,29 @@ class TestAdminScanLogExtra:
     # L-M3: Log supports pagination
     def test_log_pagination(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-lm3", "PlayerLM3")
+        register_player(client, make_player_id("player-lm3"), "PlayerLM3")
         tags = create_tag(admin_client, "unlimited", {"points": 5})
         tag_id = tags[0]["id"]
 
         # Perform 5 scans
         for _ in range(5):
             rate_limiter.clear()
-            scan_tag(client, "player-lm3", tag_id)
+            scan_tag(client, make_player_id("player-lm3"), tag_id)
 
         # Page 1 with per_page=2 → 2 items
-        r_p1 = admin_client.get(f"/admin/api/log?player_id=player-lm3&page=1&per_page=2")
+        r_p1 = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-lm3')}&page=1&per_page=2")
         assert r_p1.status_code == 200
         body_p1 = r_p1.get_json()
         assert len(body_p1["items"]) == 2
 
         # Page 2 → 2 items
-        r_p2 = admin_client.get(f"/admin/api/log?player_id=player-lm3&page=2&per_page=2")
+        r_p2 = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-lm3')}&page=2&per_page=2")
         assert r_p2.status_code == 200
         body_p2 = r_p2.get_json()
         assert len(body_p2["items"]) == 2
 
         # Page 3 → 1 item (the last one)
-        r_p3 = admin_client.get(f"/admin/api/log?player_id=player-lm3&page=3&per_page=2")
+        r_p3 = admin_client.get(f"/admin/api/log?player_id={make_player_id('player-lm3')}&page=3&per_page=2")
         assert r_p3.status_code == 200
         body_p3 = r_p3.get_json()
         assert len(body_p3["items"]) == 1

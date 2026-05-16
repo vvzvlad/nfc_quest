@@ -1,7 +1,7 @@
 """
 Block E: Scoreboard endpoint tests.
 """
-from helpers import start_game, create_tag, register_player, scan_tag
+from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
 from blueprints.game_api import rate_limiter
 
 
@@ -11,14 +11,14 @@ class TestScoreboard:
         start_game(admin_client)
 
         # Register three players
-        register_player(client, "player-e1a", "Alice")
-        register_player(client, "player-e1b", "Bob")
-        register_player(client, "player-e1c", "Charlie")
+        register_player(client, make_player_id("player-e1a"), "Alice")
+        register_player(client, make_player_id("player-e1b"), "Bob")
+        register_player(client, make_player_id("player-e1c"), "Charlie")
 
         # Give them different point totals via admin adjust
-        admin_client.post("/admin/api/players/player-e1a/adjust", json={"delta": 100})
-        admin_client.post("/admin/api/players/player-e1b/adjust", json={"delta": 50})
-        admin_client.post("/admin/api/players/player-e1c/adjust", json={"delta": 200})
+        admin_client.post(f"/admin/api/players/{make_player_id('player-e1a')}/adjust", json={"delta": 100})
+        admin_client.post(f"/admin/api/players/{make_player_id('player-e1b')}/adjust", json={"delta": 50})
+        admin_client.post(f"/admin/api/players/{make_player_id('player-e1c')}/adjust", json={"delta": 200})
 
         r = client.get("/api/scoreboard")
         assert r.status_code == 200
@@ -65,14 +65,14 @@ class TestScoreboard:
         start_game(admin_client)
 
         # Bob registers first but has PK "player-em1z" (lexicographically LATER)
-        register_player(client, "player-em1z", "Bob")
+        register_player(client, make_player_id("player-em1z"), "Bob")
         time.sleep(0.05)
         # Alice registers second but has PK "player-em1a" (lexicographically EARLIER)
-        register_player(client, "player-em1a", "Alice")
+        register_player(client, make_player_id("player-em1a"), "Alice")
 
         # Give both exactly 50 points
-        admin_client.post("/admin/api/players/player-em1z/adjust", json={"delta": 50})
-        admin_client.post("/admin/api/players/player-em1a/adjust", json={"delta": 50})
+        admin_client.post(f"/admin/api/players/{make_player_id('player-em1z')}/adjust", json={"delta": 50})
+        admin_client.post(f"/admin/api/players/{make_player_id('player-em1a')}/adjust", json={"delta": 50})
 
         r = client.get("/api/scoreboard")
         assert r.status_code == 200
@@ -128,11 +128,11 @@ class TestScoreboard:
     # E-M4: Scoreboard includes players with zero points
     def test_scoreboard_includes_zero_points_players(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-em4a", "PlayerEM4A")
-        register_player(client, "player-em4b", "PlayerEM4B")
+        register_player(client, make_player_id("player-em4a"), "PlayerEM4A")
+        register_player(client, make_player_id("player-em4b"), "PlayerEM4B")
 
         # Only give points to player A; player B stays at 0
-        admin_client.post("/admin/api/players/player-em4a/adjust", json={"delta": 50})
+        admin_client.post(f"/admin/api/players/{make_player_id('player-em4a')}/adjust", json={"delta": 50})
 
         r = client.get("/api/scoreboard")
         assert r.status_code == 200
@@ -146,17 +146,147 @@ class TestScoreboard:
         player_b = next(p for p in players if p["nick"] == "PlayerEM4B")
         assert player_b["points"] == 0
 
+    # E-M6: Rank is computed correctly as players accumulate points via scans
+    def test_scoreboard_rank_computed_correctly(self, client, admin_client):
+        start_game(admin_client)
+
+        # Create tags with different point values
+        tags_10 = create_tag(admin_client, "unlimited", {"points": 10})
+        tags_20 = create_tag(admin_client, "unlimited", {"points": 20})
+        tags_5 = create_tag(admin_client, "unlimited", {"points": 5})
+
+        # Register four players
+        register_player(client, make_player_id("rank-a"), "Alpha")
+        register_player(client, make_player_id("rank-b"), "Beta")
+        register_player(client, make_player_id("rank-c"), "Gamma")
+        register_player(client, make_player_id("rank-d"), "Delta")
+
+        # Alpha scans 10-point tag twice → 20 pts
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("rank-a"), tags_10[0]["id"])
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("rank-a"), tags_10[0]["id"])
+
+        # Beta scans 20-point tag three times → 60 pts
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("rank-b"), tags_20[0]["id"])
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("rank-b"), tags_20[0]["id"])
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("rank-b"), tags_20[0]["id"])
+
+        # Gamma scans 5-point tag once → 5 pts
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("rank-c"), tags_5[0]["id"])
+
+        # Delta has no scans → 0 pts
+
+        r = client.get("/api/scoreboard")
+        assert r.status_code == 200
+        players = r.get_json()["players"]
+        assert len(players) == 4
+
+        # Expected order: Beta(60) > Alpha(20) > Gamma(5) > Delta(0)
+        assert players[0]["nick"] == "Beta"
+        assert players[0]["points"] == 60
+        assert players[0]["rank"] == 1
+
+        assert players[1]["nick"] == "Alpha"
+        assert players[1]["points"] == 20
+        assert players[1]["rank"] == 2
+
+        assert players[2]["nick"] == "Gamma"
+        assert players[2]["points"] == 5
+        assert players[2]["rank"] == 3
+
+        assert players[3]["nick"] == "Delta"
+        assert players[3]["points"] == 0
+        assert players[3]["rank"] == 4
+
+    # E-M7: Rank updates correctly after leapfrogging another player
+    def test_scoreboard_rank_updates_on_leapfrog(self, client, admin_client):
+        start_game(admin_client)
+
+        tags_50 = create_tag(admin_client, "unlimited", {"points": 50})
+
+        register_player(client, make_player_id("leap-a"), "Leader")
+        register_player(client, make_player_id("leap-b"), "Chaser")
+
+        # Leader gets 50 pts
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("leap-a"), tags_50[0]["id"])
+
+        r = client.get("/api/scoreboard")
+        players = r.get_json()["players"]
+        assert players[0]["nick"] == "Leader"
+        assert players[0]["rank"] == 1
+        assert players[1]["nick"] == "Chaser"
+        assert players[1]["rank"] == 2
+
+        # Chaser scans twice → 100 pts, leapfrogs Leader
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("leap-b"), tags_50[0]["id"])
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("leap-b"), tags_50[0]["id"])
+
+        r = client.get("/api/scoreboard")
+        players = r.get_json()["players"]
+        assert players[0]["nick"] == "Chaser"
+        assert players[0]["points"] == 100
+        assert players[0]["rank"] == 1
+        assert players[1]["nick"] == "Leader"
+        assert players[1]["points"] == 50
+        assert players[1]["rank"] == 2
+
+    # E-M8: Players with tied points get consecutive ranks (no gaps)
+    def test_scoreboard_rank_no_gaps_on_ties(self, client, admin_client):
+        import time
+        start_game(admin_client)
+
+        tags_30 = create_tag(admin_client, "unlimited", {"points": 30})
+
+        # Register in controlled order to make tie-breaking deterministic
+        register_player(client, make_player_id("tie-first"), "First")
+        time.sleep(0.05)
+        register_player(client, make_player_id("tie-second"), "Second")
+        time.sleep(0.05)
+        register_player(client, make_player_id("tie-third"), "Third")
+
+        # All three get the same points (30 each)
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("tie-first"), tags_30[0]["id"])
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("tie-second"), tags_30[0]["id"])
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("tie-third"), tags_30[0]["id"])
+
+        r = client.get("/api/scoreboard")
+        players = r.get_json()["players"]
+        assert len(players) == 3
+
+        # All have 30 points; ranks must be 1, 2, 3 (consecutive, no gaps)
+        ranks = [p["rank"] for p in players]
+        assert ranks == [1, 2, 3]
+
+        # Tie-breaking by registration order: First, Second, Third
+        assert players[0]["nick"] == "First"
+        assert players[1]["nick"] == "Second"
+        assert players[2]["nick"] == "Third"
+
+        # All points equal
+        assert all(p["points"] == 30 for p in players)
+
     # E-M5: scans_per_minute is > 0 after recent scans
     def test_scoreboard_scans_per_minute_nonzero(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-em5", "PlayerEM5")
+        register_player(client, make_player_id("player-em5"), "PlayerEM5")
         tags = create_tag(admin_client, "unlimited", {"points": 5})
         tag_id = tags[0]["id"]
 
         # Perform 3 scans
         for _ in range(3):
             rate_limiter.clear()
-            scan_tag(client, "player-em5", tag_id)
+            scan_tag(client, make_player_id("player-em5"), tag_id)
 
         r = client.get("/api/scoreboard")
         assert r.status_code == 200

@@ -2,6 +2,15 @@
 Shared helper functions for E2E test modules.
 These are plain functions (not fixtures) that call the Flask test client.
 """
+import uuid
+
+# Fixed namespace for deterministic UUID generation from test seeds
+_TEST_UUID_NS = uuid.UUID("12345678-1234-5678-1234-567812345678")
+
+
+def make_player_id(seed: str) -> str:
+    """Return a deterministic UUID string for a given seed (for use in tests)."""
+    return str(uuid.uuid5(_TEST_UUID_NS, seed))
 
 
 def start_game(admin_client):

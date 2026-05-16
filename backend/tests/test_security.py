@@ -5,7 +5,7 @@ tag ID enumeration, batch limits, WebSocket client messages.
 import pytest
 from datetime import datetime, timezone, timedelta
 
-from helpers import start_game, create_tag, register_player, scan_tag
+from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
 from blueprints.game_api import rate_limiter
 
 
@@ -18,7 +18,7 @@ class TestNickInjection:
     ])
     def test_register_xss_nick_stored_literally(self, client, nick):
         """Nicks with HTML/SQL injection are stored as-is without server crash."""
-        pid = f"player-xss-{hash(nick) % 10000}"
+        pid = make_player_id(f"player-xss-{hash(nick) % 10000}")
         r = register_player(client, pid, nick)
         assert r.status_code == 201
         assert r.get_json()["nick"] == nick
@@ -30,7 +30,7 @@ class TestNickInjection:
     def test_xss_nick_on_scoreboard(self, client, admin_client, nick):
         """Nicks with injection content appear on scoreboard without being interpreted."""
         start_game(admin_client)
-        pid = f"player-xss-sb-{hash(nick) % 10000}"
+        pid = make_player_id(f"player-xss-sb-{hash(nick) % 10000}")
         register_player(client, pid, nick)
 
         sb = client.get("/api/scoreboard").get_json()
@@ -82,17 +82,18 @@ class TestAdminBruteForce:
         r_ok = client.post("/admin/api/login", json={"password": "testpass"})
         assert r_ok.status_code == 200
 
-    def test_login_rate_limit_blocks_even_correct_password(self, client):
-        """Once rate-limited, even the correct password is rejected with 429."""
+    def test_login_rate_limit_does_not_block_correct_password(self, client):
+        """After rate limit is exhausted, correct password still succeeds (DoS protection)."""
         from blueprints.admin_api import _login_attempts
         _login_attempts.clear()
 
         for i in range(5):
             client.post("/admin/api/login", json={"password": f"wrong-{i}"})
 
-        # Correct password should also be blocked
+        # Correct password should succeed even after exhausting the rate limit
         r = client.post("/admin/api/login", json={"password": "testpass"})
-        assert r.status_code == 429
+        assert r.status_code == 200
+        assert r.get_json()["ok"] is True
 
     def test_login_rate_limit_resets_after_window(self, client):
         """After the rate limit window expires, login attempts work again."""
@@ -173,10 +174,10 @@ class TestTagIdEnumeration:
     def test_unknown_tag_returns_same_response_shape(self, client, admin_client):
         """Response for unknown tag has same shape as known-but-unknown-strategy."""
         start_game(admin_client)
-        register_player(client, "player-enum", "EnumPlayer")
+        register_player(client, make_player_id("player-enum"), "EnumPlayer")
 
         rate_limiter.clear()
-        r = scan_tag(client, "player-enum", "ZZZZ-ZZZ")
+        r = scan_tag(client, make_player_id("player-enum"), "ZZZZ-ZZZ")
         assert r.status_code == 200
         body = r.get_json()
         assert body["status"] == "unknown"
@@ -187,14 +188,14 @@ class TestTagIdEnumeration:
         start_game(admin_client)
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         real_tag_id = tags[0]["id"]
-        register_player(client, "player-enum2", "EnumPlayer2")
+        register_player(client, make_player_id("player-enum2"), "EnumPlayer2")
 
         rate_limiter.clear()
-        r_real = scan_tag(client, "player-enum2", real_tag_id)
+        r_real = scan_tag(client, make_player_id("player-enum2"), real_tag_id)
         assert r_real.status_code == 200
 
         rate_limiter.clear()
-        r_fake = scan_tag(client, "player-enum2", "0000-000")
+        r_fake = scan_tag(client, make_player_id("player-enum2"), "0000-000")
         assert r_fake.status_code == 200
 
 

@@ -3,7 +3,7 @@ Game lifecycle tests: restart after stop, game boundary timing, game_status via 
 """
 from datetime import datetime, timezone, timedelta
 
-from helpers import start_game, create_tag, register_player, scan_tag
+from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
 from blueprints.game_api import rate_limiter
 
 
@@ -34,24 +34,24 @@ class TestGameRestart:
     def test_start_stop_start_scan_works(self, client, admin_client):
         """After start → stop → start, scanning should succeed again."""
         start_game(admin_client)
-        register_player(client, "player-restart", "RestartPlayer")
+        register_player(client, make_player_id("player-restart"), "RestartPlayer")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
-        r1 = scan_tag(client, "player-restart", tag_id)
+        r1 = scan_tag(client, make_player_id("player-restart"), tag_id)
         assert r1.get_json()["status"] == "ok"
 
         admin_client.post("/admin/api/game/stop")
 
         rate_limiter.clear()
-        r2 = scan_tag(client, "player-restart", tag_id)
+        r2 = scan_tag(client, make_player_id("player-restart"), tag_id)
         assert r2.get_json()["status"] == "finished"
 
         admin_client.post("/admin/api/game/start")
 
         rate_limiter.clear()
-        r3 = scan_tag(client, "player-restart", tag_id)
+        r3 = scan_tag(client, make_player_id("player-restart"), tag_id)
         assert r3.get_json()["status"] == "ok"
         assert r3.get_json()["delta"] == 10
 
@@ -64,12 +64,12 @@ class TestGameEdgeCases:
             json={"starts_at": None, "ends_at": "2099-12-31T00:00:00Z"},
         )
 
-        register_player(client, "player-edge1", "EdgePlayer1")
+        register_player(client, make_player_id("player-edge1"), "EdgePlayer1")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
-        r = scan_tag(client, "player-edge1", tag_id)
+        r = scan_tag(client, make_player_id("player-edge1"), tag_id)
         assert r.status_code == 200
         assert r.get_json()["status"] == "not_yet"
 
@@ -98,12 +98,12 @@ class TestGameBoundary:
                 "ends_at": "2099-12-31T23:59:59Z",
             },
         )
-        register_player(client, "player-boundary", "BoundaryPlayer")
+        register_player(client, make_player_id("player-boundary"), "BoundaryPlayer")
         tags = create_tag(admin_client, "unlimited", {"points": 20})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
-        r = scan_tag(client, "player-boundary", tag_id)
+        r = scan_tag(client, make_player_id("player-boundary"), tag_id)
         assert r.status_code == 200
         assert r.get_json()["status"] == "ok"
 
@@ -117,11 +117,11 @@ class TestGameBoundary:
             "/admin/api/game",
             json={"starts_at": starts_at, "ends_at": ends_at},
         )
-        register_player(client, "player-boundary2", "BoundaryPlayer2")
+        register_player(client, make_player_id("player-boundary2"), "BoundaryPlayer2")
         tags = create_tag(admin_client, "unlimited", {"points": 20})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
-        r = scan_tag(client, "player-boundary2", tag_id)
+        r = scan_tag(client, make_player_id("player-boundary2"), tag_id)
         assert r.status_code == 200
         assert r.get_json()["status"] == "finished"

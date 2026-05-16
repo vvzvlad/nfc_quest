@@ -2,7 +2,7 @@
 Block B: Scan endpoint — game status gating tests.
 """
 import pytest
-from helpers import start_game, create_tag, register_player, scan_tag
+from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
 from blueprints.game_api import rate_limiter
 
 
@@ -15,9 +15,9 @@ class TestScanGameStatus:
             json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
         )
         tags = create_tag(admin_client, "unlimited", {"points": 10})
-        register_player(client, "player-b1", "PlayerB1")
+        register_player(client, make_player_id("player-b1"), "PlayerB1")
 
-        r = scan_tag(client, "player-b1", tags[0]["id"])
+        r = scan_tag(client, make_player_id("player-b1"), tags[0]["id"])
         assert r.status_code == 200
         body = r.get_json()
         assert body["status"] == "not_yet"
@@ -27,19 +27,29 @@ class TestScanGameStatus:
 
     # B2: Scan after game has finished → status "finished"
     def test_scan_game_finished(self, client, admin_client):
-        # Set ends_at in the distant past so the game is already finished
+        # Start the game so the player can register
+        admin_client.put(
+            "/admin/api/game",
+            json={"starts_at": "2000-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
+        )
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        # Register the player while the game is active (registration is blocked when finished)
+        register_player(client, make_player_id("player-b2"), "PlayerB2")
+
+        # Now end the game by setting ends_at in the past
         admin_client.put(
             "/admin/api/game",
             json={"starts_at": "2000-01-01T00:00:00Z", "ends_at": "2020-01-01T00:00:00Z"},
         )
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
-        register_player(client, "player-b2", "PlayerB2")
 
-        r = scan_tag(client, "player-b2", tags[0]["id"])
+        r = scan_tag(client, make_player_id("player-b2"), tags[0]["id"])
         assert r.status_code == 200
         body = r.get_json()
         assert body["status"] == "finished"
         assert "award_message" in body
+        # rank must be present and be a positive integer (player exists and is ranked)
+        assert isinstance(body.get("rank"), int)
+        assert body["rank"] >= 1
 
     # B3: Scan with unknown player while game is active → 404
     def test_scan_unknown_player(self, client, admin_client):
@@ -55,9 +65,9 @@ class TestScanGameStatus:
     # B4: Scan with unknown tag while game is active → status "unknown"
     def test_scan_unknown_tag(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-b4", "PlayerB4")
+        register_player(client, make_player_id("player-b4"), "PlayerB4")
 
-        r = scan_tag(client, "player-b4", "FFFF-FFF")
+        r = scan_tag(client, make_player_id("player-b4"), "FFFF-FFF")
         assert r.status_code == 200
         body = r.get_json()
         assert body["status"] == "unknown"
@@ -99,13 +109,13 @@ class TestScanGameStatus:
     def test_rate_limit_priority_over_game_status(self, client, admin_client):
         # Start game, register player, create tag
         start_game(admin_client)
-        register_player(client, "player-b5", "PlayerB5")
+        register_player(client, make_player_id("player-b5"), "PlayerB5")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
         # First scan succeeds while game is active
         rate_limiter.clear()
-        r1 = scan_tag(client, "player-b5", tag_id)
+        r1 = scan_tag(client, make_player_id("player-b5"), tag_id)
         assert r1.status_code == 200
         assert r1.get_json()["status"] == "ok"
 
@@ -113,7 +123,7 @@ class TestScanGameStatus:
         admin_client.post("/admin/api/game/stop")
 
         # Immediately scan again WITHOUT clearing rate_limiter — should get 429, not "finished"
-        r2 = scan_tag(client, "player-b5", tag_id)
+        r2 = scan_tag(client, make_player_id("player-b5"), tag_id)
         assert r2.status_code == 429
         assert r2.get_json()["status"] == "rate_limit"
         assert r2.get_json()["message"] == "RATE_LIMIT_WAIT"
@@ -121,7 +131,7 @@ class TestScanGameStatus:
     # 1.4: Scanning a tag that has been deleted returns status "unknown"
     def test_scan_deleted_tag(self, client, admin_client):
         start_game(admin_client)
-        register_player(client, "player-del-tag", "DelTagPlayer")
+        register_player(client, make_player_id("player-del-tag"), "DelTagPlayer")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
@@ -133,8 +143,6 @@ class TestScanGameStatus:
         rate_limiter.clear()
 
         # Scanning a deleted tag should return "unknown" (tag no longer exists)
-        r = scan_tag(client, "player-del-tag", tag_id)
+        r = scan_tag(client, make_player_id("player-del-tag"), tag_id)
         assert r.status_code == 200
         assert r.get_json()["status"] == "unknown"
-
-

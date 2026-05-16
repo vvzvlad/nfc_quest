@@ -1,7 +1,7 @@
 """
 Block F: End-to-end integration flow tests.
 """
-from helpers import start_game, create_tag, register_player, scan_tag
+from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
 from blueprints.game_api import rate_limiter
 
 
@@ -12,7 +12,7 @@ class TestE2EFlows:
         start_game(admin_client)
 
         # 2. Register a player
-        r_reg = register_player(client, "player-f1", "HeroPlayer")
+        r_reg = register_player(client, make_player_id("player-f1"), "HeroPlayer")
         assert r_reg.status_code == 201
         player_id = r_reg.get_json()["player_id"]
 
@@ -42,21 +42,21 @@ class TestE2EFlows:
         start_game(admin_client)
 
         # 2. Register two players
-        register_player(client, "player-f2a", "PlayerA")
-        register_player(client, "player-f2b", "PlayerB")
+        register_player(client, make_player_id("player-f2a"), "PlayerA")
+        register_player(client, make_player_id("player-f2b"), "PlayerB")
 
         # 3. Create a one_time_global tag worth 50 points
         tags = create_tag(admin_client, "one_time_global", {"points": 50})
         tag_id = tags[0]["id"]
 
         # 4. Player A scans first — should succeed
-        r_a = scan_tag(client, "player-f2a", tag_id)
+        r_a = scan_tag(client, make_player_id("player-f2a"), tag_id)
         assert r_a.status_code == 200
         assert r_a.get_json()["status"] == "ok"
 
         # 5. Player B scans same tag — should be locked
         rate_limiter.clear()
-        r_b = scan_tag(client, "player-f2b", tag_id)
+        r_b = scan_tag(client, make_player_id("player-f2b"), tag_id)
         assert r_b.status_code == 200
         assert r_b.get_json()["status"] == "locked"
 
@@ -77,7 +77,7 @@ class TestE2EFlows:
     # F3: Full game lifecycle — not_yet → active → finished
     def test_game_lifecycle(self, client, admin_client):
         # Register a player and create a tag upfront
-        register_player(client, "player-f3", "LifecyclePlayer")
+        register_player(client, make_player_id("player-f3"), "LifecyclePlayer")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
@@ -87,14 +87,14 @@ class TestE2EFlows:
             json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
         )
         rate_limiter.clear()
-        r1 = scan_tag(client, "player-f3", tag_id)
+        r1 = scan_tag(client, make_player_id("player-f3"), tag_id)
         assert r1.status_code == 200
         assert r1.get_json()["status"] == "not_yet"
 
         # Step 2: Start the game — scan returns "ok"
         rate_limiter.clear()
         admin_client.post("/admin/api/game/start")
-        r2 = scan_tag(client, "player-f3", tag_id)
+        r2 = scan_tag(client, make_player_id("player-f3"), tag_id)
         assert r2.status_code == 200
         body2 = r2.get_json()
         assert body2["status"] == "ok"
@@ -105,7 +105,7 @@ class TestE2EFlows:
         # Step 3: Stop the game — scan returns "finished"
         rate_limiter.clear()
         admin_client.post("/admin/api/game/stop")
-        r3 = scan_tag(client, "player-f3", tag_id)
+        r3 = scan_tag(client, make_player_id("player-f3"), tag_id)
         assert r3.status_code == 200
         assert r3.get_json()["status"] == "finished"
 
@@ -121,8 +121,8 @@ class TestE2EFlows:
         tag_id = tags[0]["id"]
 
         # Register and scan back-to-back
-        register_player(client, "player-f4", "PlayerF4")
-        r_scan = scan_tag(client, "player-f4", tag_id)
+        register_player(client, make_player_id("player-f4"), "PlayerF4")
+        r_scan = scan_tag(client, make_player_id("player-f4"), tag_id)
         assert r_scan.status_code == 200
         body = r_scan.get_json()
         assert body["status"] == "ok"
@@ -135,17 +135,17 @@ class TestE2EFlows:
             "/admin/api/game",
             json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
         )
-        register_player(client, "player-f5", "PlayerF5")
+        register_player(client, make_player_id("player-f5"), "PlayerF5")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
         # First scan returns "not_yet" and updates rate_limiter
         rate_limiter.clear()
-        r1 = scan_tag(client, "player-f5", tag_id)
+        r1 = scan_tag(client, make_player_id("player-f5"), tag_id)
         assert r1.get_json()["status"] == "not_yet"
 
         # Second immediate scan WITHOUT clearing rate_limiter — must be rate-limited
-        r2 = scan_tag(client, "player-f5", tag_id)
+        r2 = scan_tag(client, make_player_id("player-f5"), tag_id)
         assert r2.status_code == 429
         assert r2.get_json()["status"] == "rate_limit"
         assert r2.get_json()["message"] == "RATE_LIMIT_WAIT"
@@ -163,7 +163,7 @@ class TestE2EFlows:
         )
 
         # Attempt to register a new player
-        r = register_player(client, "player-f6", "PlayerF6")
+        r = register_player(client, make_player_id("player-f6"), "PlayerF6")
         assert r.status_code == 403
         assert "error" in r.get_json()
         assert r.get_json()["error"] == "REGISTRATION_CLOSED"
@@ -180,13 +180,13 @@ class TestE2EFlows:
             },
         )
 
-        register_player(client, "player-f7", "PlayerF7")
+        register_player(client, make_player_id("player-f7"), "PlayerF7")
         tags = create_tag(admin_client, "unlimited", {"points": 10})
         tag_id = tags[0]["id"]
 
         # Scan in finished game state
         rate_limiter.clear()
-        r = scan_tag(client, "player-f7", tag_id)
+        r = scan_tag(client, make_player_id("player-f7"), tag_id)
         assert r.status_code == 200
         body = r.get_json()
         assert body["status"] == "finished"

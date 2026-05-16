@@ -2,34 +2,34 @@
 Block A: Player registration tests.
 """
 import pytest
-from helpers import register_player, start_game
+from helpers import register_player, start_game, make_player_id
 
 
 class TestRegister:
     # A1: Registering a new player returns 201 with expected fields
     def test_register_new_player(self, client):
-        r = register_player(client, "uuid-1", "Alice")
+        r = register_player(client, make_player_id("uuid-1"), "Alice")
         assert r.status_code == 201
         body = r.get_json()
-        assert body["player_id"] == "uuid-1"
+        assert body["player_id"] == make_player_id("uuid-1")
         assert body["nick"] == "Alice"
         assert body["points"] == 0
 
     # A2: Registering with the same player_id is idempotent — returns existing data
     def test_register_idempotent(self, client):
-        register_player(client, "uuid-1", "Alice")
+        register_player(client, make_player_id("uuid-1"), "Alice")
         # Second call with a different nick should return original data unchanged
-        r2 = register_player(client, "uuid-1", "AliceChanged")
+        r2 = register_player(client, make_player_id("uuid-1"), "AliceChanged")
         assert r2.status_code == 200
         body = r2.get_json()
-        assert body["player_id"] == "uuid-1"
+        assert body["player_id"] == make_player_id("uuid-1")
         assert body["nick"] == "Alice"  # nick not overwritten
         assert body["points"] == 0
 
     # A3: Two different player_ids with the same nick → 409 on the second
     def test_register_nick_conflict(self, client):
-        register_player(client, "uuid-1", "SharedNick")
-        r2 = register_player(client, "uuid-2", "SharedNick")
+        register_player(client, make_player_id("uuid-1"), "SharedNick")
+        r2 = register_player(client, make_player_id("uuid-2"), "SharedNick")
         assert r2.status_code == 409
         body = r2.get_json()
         assert "error" in body
@@ -37,11 +37,11 @@ class TestRegister:
 
     # A4: Missing required fields → 400
     @pytest.mark.parametrize("payload", [
-        {"player_id": "", "nick": "Alice"},      # empty player_id
-        {"player_id": "uuid-1", "nick": ""},     # empty nick
-        {},                                       # completely empty body
-        {"player_id": "   ", "nick": "Alice"},   # whitespace-only player_id
-        {"player_id": "uuid-1", "nick": "   "}, # whitespace-only nick
+        {"player_id": "", "nick": "Alice"},                               # empty player_id
+        {"player_id": make_player_id("uuid-1"), "nick": ""},             # empty nick
+        {},                                                               # completely empty body
+        {"player_id": "   ", "nick": "Alice"},                           # whitespace-only player_id
+        {"player_id": make_player_id("uuid-1"), "nick": "   "},         # whitespace-only nick
     ])
     def test_register_missing_fields(self, client, payload):
         r = client.post("/api/register", json=payload)
@@ -50,21 +50,19 @@ class TestRegister:
         assert "error" in body
         assert body["error"] == "MISSING_FIELDS"
 
-    # R-M1: SQLite doesn't enforce VARCHAR(64); a 100-char nick is accepted silently
+    # R-M1: Nick longer than 64 characters should be rejected with 400 NICK_TOO_LONG
     def test_register_nick_too_long(self, client):
         long_nick = "A" * 100
-        r = register_player(client, "uuid-long-nick", long_nick)
-        assert r.status_code == 201
-        body = r.get_json()
-        assert body["nick"] == long_nick
+        r = register_player(client, make_player_id("uuid-long-nick"), long_nick)
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "NICK_TOO_LONG"
 
-    # R-M2: SQLite doesn't enforce VARCHAR length on player_id either
+    # R-M2: A non-UUID player_id is rejected with 400 INVALID_PLAYER_ID
     def test_register_player_id_too_long(self, client):
         long_id = "x" * 100
         r = register_player(client, long_id, "PlayerLongId")
-        assert r.status_code == 201
-        body = r.get_json()
-        assert body["player_id"] == long_id
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "INVALID_PLAYER_ID"
 
     # R-M3: Registration should work in not_started/active states,
     # but the sub-case for "finished" state expects 403 (WILL FAIL — current code returns 201)
@@ -88,7 +86,7 @@ class TestRegister:
                 },
             )
 
-        r = register_player(client, f"uuid-state-{game_state}", f"Player_{game_state}")
+        r = register_player(client, make_player_id(f"uuid-state-{game_state}"), f"Player_{game_state}")
         assert r.status_code == expected_status
         if expected_status == 403:
             assert "error" in r.get_json()
@@ -106,11 +104,11 @@ class TestRegister:
     # A2-fix: Idempotent re-registration returns the player's CURRENT points (not zero)
     def test_register_idempotent_returns_current_points(self, client, admin_client):
         # Register player, then give them 50 points via admin adjust
-        register_player(client, "uuid-pts", "PlayerPts")
-        admin_client.post("/admin/api/players/uuid-pts/adjust", json={"delta": 50})
+        register_player(client, make_player_id("uuid-pts"), "PlayerPts")
+        admin_client.post(f"/admin/api/players/{make_player_id('uuid-pts')}/adjust", json={"delta": 50})
 
         # Re-register with the same player_id — should return current points (50)
-        r2 = register_player(client, "uuid-pts", "PlayerPtsChanged")
+        r2 = register_player(client, make_player_id("uuid-pts"), "PlayerPtsChanged")
         assert r2.status_code == 200
         body = r2.get_json()
         assert body["points"] == 50
@@ -118,16 +116,15 @@ class TestRegister:
     # 1.3: After a player is deleted, their nick is freed and can be reused by a new player
     def test_register_nick_freed_after_player_delete(self, client, admin_client):
         # Register first player with nick "Alice"
-        r1 = register_player(client, "uuid-alice-1", "Alice")
+        r1 = register_player(client, make_player_id("uuid-alice-1"), "Alice")
         assert r1.status_code == 201
 
         # Delete the first player — this should free the nick
-        r_del = admin_client.delete("/admin/api/players/uuid-alice-1")
+        r_del = admin_client.delete(f"/admin/api/players/{make_player_id('uuid-alice-1')}")
         assert r_del.status_code == 200
 
         # A new player should now be able to register with the same nick
-        r2 = register_player(client, "uuid-alice-2", "Alice")
+        r2 = register_player(client, make_player_id("uuid-alice-2"), "Alice")
         assert r2.status_code == 201
         body = r2.get_json()
         assert body["nick"] == "Alice"
-
