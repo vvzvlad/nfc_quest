@@ -65,14 +65,14 @@ class TestRegister:
         assert r.get_json()["error"] == "INVALID_PLAYER_ID"
 
     # R-M5: Nick containing control characters (Unicode Cc category) is rejected
-    @pytest.mark.parametrize("bad_nick", [
-        "alice\nbob",      # newline
-        "eve\rmalory",     # carriage return
-        "null\x00byte",    # null byte
-        "tab\there",       # tab (U+0009, category Cc)
+    @pytest.mark.parametrize("bad_nick,uid_suffix", [
+        ("alice\nbob",   "nl"),   # newline
+        ("eve\rmalory",  "cr"),   # carriage return
+        ("null\x00byte", "nb"),   # null byte
+        ("tab\there",    "tb"),   # tab (U+0009, category Cc)
     ])
-    def test_register_nick_with_control_chars(self, client, bad_nick):
-        r = register_player(client, make_player_id("uuid-ctrl"), bad_nick)
+    def test_register_nick_with_control_chars(self, client, bad_nick, uid_suffix):
+        r = register_player(client, make_player_id(f"uuid-ctrl-{uid_suffix}"), bad_nick)
         assert r.status_code == 400
         assert r.get_json()["error"] == "INVALID_NICK"
 
