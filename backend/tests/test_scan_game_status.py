@@ -73,8 +73,7 @@ class TestScanGameStatus:
         start_game(admin_client)
         r = client.post("/api/scan", json=payload)
         assert r.status_code == expected_status
-        if expected_status == 400:
-            assert r.get_json()["error"] == "MISSING_FIELDS"
+        assert r.get_json()["error"] == "MISSING_FIELDS"
 
     # S-M1b: Scan with wrong content-type returns 400
     def test_scan_wrong_content_type(self, client, admin_client):
@@ -85,12 +84,14 @@ class TestScanGameStatus:
             content_type="text/plain",
         )
         assert r.status_code == 400
+        assert r.get_json()["error"] == "MISSING_FIELDS"
 
     # S-M1c: Scan with no body at all returns 400
     def test_scan_no_body(self, client, admin_client):
         start_game(admin_client)
         r = client.post("/api/scan")
         assert r.status_code == 400
+        assert r.get_json()["error"] == "MISSING_FIELDS"
 
     # B5: Rate limit check happens BEFORE game status check
     # When game is stopped and player scans immediately after first scan (no rate_limiter.clear()),

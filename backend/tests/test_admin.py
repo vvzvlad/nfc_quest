@@ -258,7 +258,7 @@ class TestAdminTags:
         assert r.status_code == 404
         assert r.get_json()["error"] == "TAG_NOT_FOUND"
 
-    # G-M8: Resetting a nonexistent tag returns 404 with TAG_NOT_FOUND error code
+    # G-M13: Resetting a nonexistent tag returns 404 with TAG_NOT_FOUND error code
     def test_reset_nonexistent_tag_returns_404(self, admin_client):
         r = admin_client.post("/admin/api/tags/ZZZZ-ZZZ/reset")
         assert r.status_code == 404
