@@ -57,8 +57,12 @@ class TestScoreboard:
         assert body["stats"]["total_tags"] == 0
         assert body["stats"]["scans_per_minute"] == 0.0
 
-    # E-M1: Players with equal points should receive different ranks based on registration order
-    # WILL FAIL — current _get_rank() gives both tied players rank 1
+    # E-M1: Players with equal points should receive different ranks based on registration order.
+    # NOTE: scoreboard() assigns ranks as i+1 (positional), NOT via _get_rank().
+    # The ORDER BY points DESC has no secondary sort, so order for equal-points players
+    # is SQLite-implementation-defined. This test currently passes because the lexicographic
+    # order of PKs ("player-em1a" < "player-em1b") happens to match registration order.
+    # Once a proper secondary sort by registered_at is added, the test will be deterministic.
     def test_scoreboard_tie_breaking_by_registration_order(self, client, admin_client):
         start_game(admin_client)
 

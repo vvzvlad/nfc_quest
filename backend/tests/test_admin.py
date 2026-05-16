@@ -447,7 +447,9 @@ class TestAdminGameValidation:
         assert r.status_code == 400
         assert "error" in r.get_json()
 
-    # G-M1 sub-case 3: ends_at - starts_at == 10 minutes exactly → 200 (WILL FAIL)
+    # G-M1 sub-case 3: ends_at - starts_at == 10 minutes exactly → 200
+    # NOTE: currently passes because no validation exists yet.
+    # Will continue to pass once validation is added — 10 min is the minimum allowed boundary.
     def test_put_game_duration_exactly_10_minutes(self, admin_client):
         r = admin_client.put(
             "/admin/api/game",

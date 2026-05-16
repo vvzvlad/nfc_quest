@@ -358,9 +358,9 @@ class TestRateLimit:
         r_b = scan_tag(client, "player-dm2b", tag_id)
         assert r_b.status_code == 200
         body_b = r_b.get_json()
-        # Status can be "ok" or "locked" (if one_time_global) but must NOT be 429
-        assert body_b.get("status") in ("ok", "locked", "unknown"), \
-            f"Expected ok/locked/unknown but got: {body_b}"
+        # Tag is unlimited — it always returns "ok", never "locked" or "unknown"
+        assert body_b.get("status") == "ok", \
+            f"Expected ok but got: {body_b}"
 
     # D-M3: Rate-limited response body must have status="rate_limit" and non-empty message
     def test_rate_limit_429_body(self, client, admin_client):
