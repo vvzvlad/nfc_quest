@@ -43,12 +43,72 @@ function AdminShell({ section, title, breadcrumb, actions, children, login = fal
 
 function AdminSidebar({ active }) {
   const QUEST = React.useContext(QuestCtx);
+  const [stats, setStats] = React.useState({});
+  const [game, setGame] = React.useState({});
+  // Countdown timer tick (seconds) to force re-render each second
+  const [tick, setTick] = React.useState(0);
+
+  // Load stats and game settings on mount
+  React.useEffect(() => {
+    adminApi.getStats().then(r => { if (r.ok) setStats(r.data); });
+    adminApi.getGame().then(r => { if (r.ok) setGame(r.data); });
+  }, []);
+
+  // Countdown ticker: re-render every second for live timer display
+  React.useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const sections = [
     { id: 'game',    label: 'Управление игрой', kbd: 'G' },
-    { id: 'tags',    label: 'Метки',            kbd: 'T', meta: '64' },
-    { id: 'players', label: 'Участники',        kbd: 'P', meta: '48' },
-    { id: 'log',     label: 'Лог событий',      kbd: 'L', meta: '2 451' },
+    { id: 'tags',    label: 'Метки',            kbd: 'T', meta: stats.total_tags != null ? String(stats.total_tags) : undefined },
+    { id: 'players', label: 'Участники',        kbd: 'P', meta: stats.total_players != null ? String(stats.total_players) : undefined },
+    { id: 'log',     label: 'Лог событий',      kbd: 'L', meta: stats.total_scans != null ? String(stats.total_scans) : undefined },
   ];
+
+  // Compute game status from timestamps (same logic as ScreenAdminGame)
+  const now = Date.now();
+  const startsAt = game.starts_at ? new Date(game.starts_at).getTime() : null;
+  const endsAt = game.ends_at ? new Date(game.ends_at).getTime() : null;
+  let gameStatusLabel = 'НЕТ ДАТ';
+  let gameStatusColor = 'var(--muted)';
+  let gameStatusBorder = 'var(--line)';
+  let gameStatusBg = 'transparent';
+  let timerMs = null;
+
+  if (startsAt && endsAt) {
+    if (now < startsAt) {
+      gameStatusLabel = 'НЕ НАЧАТА';
+      gameStatusColor = 'var(--muted)';
+      gameStatusBorder = 'var(--line)';
+      timerMs = startsAt - now; // time until start
+    } else if (now >= startsAt && now < endsAt) {
+      gameStatusLabel = 'АКТИВНА';
+      gameStatusColor = 'var(--success)';
+      gameStatusBorder = 'var(--success-2)';
+      gameStatusBg = 'rgba(108,208,122,0.08)';
+      timerMs = endsAt - now; // time remaining
+    } else {
+      gameStatusLabel = 'ЗАВЕРШЕНА';
+      gameStatusColor = 'var(--warn)';
+      gameStatusBorder = 'var(--line)';
+      timerMs = null;
+    }
+  }
+
+  // Format milliseconds as HH:MM:SS
+  const fmtTimer = (ms) => {
+    if (ms == null || ms < 0) return null;
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  const timerDisplay = fmtTimer(timerMs);
+
   return (
     <div style={{
       borderRight: '1px solid var(--line)',
@@ -71,7 +131,9 @@ function AdminSidebar({ active }) {
       <div className="brak" style={{ padding: '6px 8px' }}>конференция</div>
 
       {sections.map(s => (
-        <div key={s.id} style={{
+        <div key={s.id}
+          onClick={() => { window.location.href = `/admin/${s.id}`; }}
+          style={{
           display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: 8,
           padding: '7px 8px',
           background: active === s.id ? 'var(--bg-2)' : 'transparent',
@@ -92,17 +154,19 @@ function AdminSidebar({ active }) {
 
       <div style={{ flex: 1 }} />
 
-      {/* status pill */}
+      {/* status pill — real game status with live countdown */}
       <div style={{ padding: '10px 8px', borderTop: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="brak" style={{ fontSize: 10 }}>статус игры</div>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          padding: '6px 10px', border: '1px solid var(--success-2)', background: 'rgba(108,208,122,0.08)',
+          padding: '6px 10px', border: `1px solid ${gameStatusBorder}`, background: gameStatusBg,
         }}>
-          <span style={{ width: 6, height: 6, background: 'var(--success)', borderRadius: '50%' }} />
-          <span style={{ color: 'var(--success)', fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase' }}>активна</span>
+          <span style={{ width: 6, height: 6, background: gameStatusColor, borderRadius: '50%' }} />
+          <span style={{ color: gameStatusColor, fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{gameStatusLabel}</span>
           <span style={{ flex: 1 }} />
-          <span className="mono tabular" style={{ fontSize: 11, color: 'var(--fg-2)' }}>02:13:08</span>
+          {timerDisplay && (
+            <span className="mono tabular" style={{ fontSize: 11, color: 'var(--fg-2)' }}>{timerDisplay}</span>
+          )}
         </div>
         <div className="mono" style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
           <span>admin@metascan</span>
@@ -428,6 +492,8 @@ function ScreenAdminTags() {
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [showCreate, setShowCreate] = React.useState(false);
+  // Currently selected tag for the detail panel
+  const [selectedTag, setSelectedTag] = React.useState(null);
   const perPage = 50;
 
   const loadTags = React.useCallback(() => {
@@ -442,6 +508,13 @@ function ScreenAdminTags() {
   }, [page]);
 
   React.useEffect(() => { loadTags(); }, [loadTags]);
+
+  // Dismiss tag detail panel on Escape
+  React.useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') setSelectedTag(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const handleReset = async (id) => {
     await adminApi.resetTag(id);
@@ -503,17 +576,21 @@ function ScreenAdminTags() {
             </thead>
             <tbody>
               {tags.map((t, i) => {
-                // Build params display from strategy config
-                const params = t.strategy === 'fixed' ? `+${t.points}`
-                  : t.strategy === 'penalty' ? `-${t.points}`
-                  : t.strategy === 'random' ? `+${t.min_points}…+${t.max_points}`
-                  : t.strategy === 'oneshot' ? `+${t.points}`
-                  : t.strategy === 'transfer' ? `±${t.points}`
+                // Build params display from strategy_params object returned by API
+                const sp = t.strategy_params || {};
+                const params = t.strategy === 'fixed' ? `+${sp.points ?? '?'}`
+                  : t.strategy === 'penalty' ? `-${sp.points ?? '?'}`
+                  : t.strategy === 'random' ? `+${sp.min ?? sp.min_points ?? '?'}…+${sp.max ?? sp.max_points ?? '?'}`
+                  : t.strategy === 'oneshot' ? `+${sp.points ?? '?'}`
+                  : t.strategy === 'transfer' ? `±${sp.points ?? '?'}`
                   : '—';
                 return (
-                  <tr key={t.id} style={{
+                  <tr key={t.id}
+                    onClick={() => setSelectedTag(t)}
+                    style={{
                     borderBottom: '1px solid var(--line)',
-                    background: i === 0 ? 'var(--bg-2)' : 'transparent',
+                    background: selectedTag && selectedTag.id === t.id ? 'var(--bg-2)' : i === 0 && !selectedTag ? 'var(--bg-2)' : 'transparent',
+                    cursor: 'pointer',
                   }}>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg)' }}>{t.id}</td>
                     <td style={{ padding: '5px 12px', color: 'var(--fg-2)' }}>{t.label || '—'}</td>
@@ -542,20 +619,88 @@ function ScreenAdminTags() {
           </div>
         </div>
 
-        {/* side — static detail placeholder */}
+        {/* side — tag detail panel */}
         <div style={{ borderLeft: '1px solid var(--line)', background: 'var(--bg-2)', padding: 20, display: 'flex', flexDirection: 'column', gap: 18, overflow: 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div className="brak" style={{ fontSize: 11 }}>выбрано · —</div>
-            <span className="mono" style={{ fontSize: 10, color: 'var(--muted)' }}>esc</span>
-          </div>
-          <div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>label</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em', color: 'var(--muted)' }}>нажмите на метку</div>
-          </div>
-          <div>
-            <div className="brak" style={{ fontSize: 11, marginBottom: 6 }}>история сканов</div>
-            <Sparkline />
-          </div>
+          {selectedTag ? (
+            <>
+              {/* header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="brak" style={{ fontSize: 11 }}>[ выбрано · {selectedTag.id} ]</div>
+                <span
+                  className="mono"
+                  style={{ fontSize: 10, color: 'var(--muted)', cursor: 'pointer' }}
+                  onClick={() => setSelectedTag(null)}
+                >esc</span>
+              </div>
+
+              {/* label */}
+              <div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>label</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em' }}>
+                  {selectedTag.label || '—'}
+                </div>
+              </div>
+
+              {/* URL */}
+              <div>
+                <div className="brak" style={{ fontSize: 11, marginBottom: 4 }}>url</div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--fg-2)', wordBreak: 'break-all' }}>
+                  {window.location.origin}/tag/{selectedTag.id}
+                </div>
+              </div>
+
+              {/* data rows */}
+              <KVList items={[
+                ['стратегия', selectedTag.strategy || '—'],
+                ['параметры', (() => {
+                  const sp = selectedTag.strategy_params || {};
+                  if (selectedTag.strategy === 'fixed')    return `+${sp.points ?? '?'}`;
+                  if (selectedTag.strategy === 'penalty')  return `-${sp.points ?? '?'}`;
+                  if (selectedTag.strategy === 'random')   return `+${sp.min ?? sp.min_points ?? '?'}…+${sp.max ?? sp.max_points ?? '?'}`;
+                  if (selectedTag.strategy === 'oneshot')  return `+${sp.points ?? '?'}`;
+                  if (selectedTag.strategy === 'transfer') return `±${sp.points ?? '?'}`;
+                  return JSON.stringify(sp);
+                })()],
+                ['сканов', selectedTag.total_scans ?? selectedTag.scan_count ?? 0],
+                ['уникальных', selectedTag.unique_scans ?? selectedTag.unique_players_count ?? 0],
+                ['создана', selectedTag.created_at ? new Date(selectedTag.created_at).toLocaleString('ru-RU') : '—'],
+              ]} />
+
+              {/* Sparkline visual accent */}
+              <div>
+                <Sparkline />
+              </div>
+
+              {/* actions */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+                <button
+                  className="btn ghost sm"
+                  style={{ flex: 1 }}
+                  onClick={() => { handleReset(selectedTag.id); setSelectedTag(null); }}
+                >Сброс</button>
+                <button
+                  className="btn sm"
+                  style={{ flex: 1, borderColor: 'var(--accent)', color: 'var(--accent)' }}
+                  onClick={() => { handleDelete(selectedTag.id); setSelectedTag(null); }}
+                >Удалить</button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* placeholder when nothing is selected */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="brak" style={{ fontSize: 11 }}>выбрано · —</div>
+                <span className="mono" style={{ fontSize: 10, color: 'var(--muted)' }}>esc</span>
+              </div>
+              <div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>label</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em', color: 'var(--muted)' }}>нажмите на метку</div>
+              </div>
+              <div>
+                <Sparkline />
+              </div>
+            </>
+          )}
         </div>
       </div>
     </AdminShell>
