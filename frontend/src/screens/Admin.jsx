@@ -48,10 +48,15 @@ function AdminSidebar({ active }) {
   // Countdown timer tick (seconds) to force re-render each second
   const [tick, setTick] = React.useState(0);
 
-  // Load stats and game settings on mount
+  // Load stats and game settings on mount, then refresh every 5s
   React.useEffect(() => {
-    adminApi.getStats().then(r => { if (r.ok) setStats(r.data); });
-    adminApi.getGame().then(r => { if (r.ok) setGame(r.data); });
+    const load = () => {
+      adminApi.getStats().then(r => { if (r.ok) setStats(r.data); });
+      adminApi.getGame().then(r => { if (r.ok) setGame(r.data); });
+    };
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
   }, []);
 
   // Countdown ticker: re-render every second for live timer display
@@ -617,8 +622,8 @@ function ScreenAdminTags() {
                     <td style={{ padding: '5px 12px', color: 'var(--fg-2)' }}>{t.label || '—'}</td>
                     <td style={{ padding: '5px 12px' }}><StrategyChip s={t.strategy} /></td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', color: 'var(--fg)' }} className="tabular">{params}</td>
-                    <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.total_scans ?? 0}</td>
-                    <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.unique_scans ?? 0}</td>
+                    <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.scan_count ?? 0}</td>
+                    <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.unique_players_count ?? 0}</td>
                     <td style={{ padding: '5px 12px' }}><StatusBadge s={t.status || 'active'} /></td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', textAlign: 'right' }}>
                       <span style={{ marginRight: 12, cursor: 'pointer' }} onClick={() => handleReset(t.id)}>сброс</span>
@@ -776,8 +781,8 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
           <KVList items={[
             ['стратегия', tag.strategy || '—'],
             ['параметры', paramsDisplay],
-            ['сканов', tag.total_scans ?? tag.scan_count ?? 0],
-            ['уникальных', tag.unique_scans ?? tag.unique_players_count ?? 0],
+            ['сканов', tag.scan_count ?? 0],
+            ['уникальных', tag.unique_players_count ?? 0],
             ['создана', tag.created_at ? new Date(tag.created_at).toLocaleString('ru-RU') : '—'],
           ]} />
 
@@ -1135,7 +1140,7 @@ function ScreenAdminPlayers() {
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', color: 'var(--fg-2)' }}>
                     {p.registered_at ? new Date(p.registered_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}
                   </td>
-                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)' }} className="tabular">{p.total_scans ?? 0}</td>
+                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)' }} className="tabular">{p.scan_count ?? 0}</td>
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
                     <span style={{ marginRight: 12, cursor: 'pointer' }} onClick={() => handleAdjust(p.id, p.nick)}>± баллы</span>
                     <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => handleDelete(p.id, p.nick)}>удал.</span>

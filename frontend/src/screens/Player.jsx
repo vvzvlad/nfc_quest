@@ -6,6 +6,22 @@ import { connectSocket, disconnectSocket, getLocalPlayer, api } from '../api.js'
 // Registration → Scan result (7 states) → Mobile scoreboard
 // Canon direction: bracketed mono titles, big numerals, ИБ-конференц-эстетика.
 
+// Returns a correctly pluralised Russian string for the word "участник".
+// Russian plural rules: 1 → участник, 2-4 → участника, 5+ → участников.
+function pluralParticipants(n) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  let word;
+  if (mod10 === 1 && mod100 !== 11) {
+    word = 'участник';
+  } else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    word = 'участника';
+  } else {
+    word = 'участников';
+  }
+  return `${n} ${word}`;
+}
+
 // ─── Shared phone header (quest title bar) ─────────────────────
 function QuestHeader({ user, score, simple = false }) {
   const QUEST = React.useContext(QuestCtx);
@@ -130,12 +146,41 @@ function ScreenRegistration({ onRegister, error, tagId }) {
 // `boardSlice` is an array of [place, name, score, opts?] where
 // opts can include {mine, delta, prevPlace}.
 
+// Compute h:mm:ss string from a target ISO date string; returns '' if no target
+function computeCountdown(target) {
+  if (!target) return '';
+  const diff = Math.max(0, new Date(target).getTime() - Date.now());
+  const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
+  const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+  const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
 function ScanResultLayout({
   user, score, tagId, strategy, tone = 'accent',
   hero, sub, meta, scanLabel = 'scan · ok', wideHero = false,
-  boardTimerLabel = 'до конца', boardTimer = '02:13:08',
+  boardTimerLabel = 'до конца', boardTimer = '',
+  timerTarget,
   boardSlice, boardEmpty, totalPlayers,
 }) {
+  // Live countdown from timerTarget ISO string; falls back to static boardTimer string
+  const [liveTimer, setLiveTimer] = React.useState(
+    () => timerTarget ? computeCountdown(timerTarget) : (boardTimer || '')
+  );
+  React.useEffect(() => {
+    if (!timerTarget) {
+      // No live target — just show static boardTimer as-is
+      setLiveTimer(boardTimer || '');
+      return;
+    }
+    const tick = () => {
+      setLiveTimer(computeCountdown(timerTarget));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [timerTarget, boardTimer]);
+
   const tones = {
     plus:    { color: 'var(--success)' },
     minus:   { color: 'var(--accent)' },
@@ -231,7 +276,7 @@ function ScanResultLayout({
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span className="mono" style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>{boardTimerLabel}</span>
-            <span className="mono tabular" style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.02em' }}>{boardTimer}</span>
+            <span className="mono tabular" style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.02em' }}>{liveTimer}</span>
           </div>
         </div>
         <div style={{ flex: 1, overflow: 'auto', padding: '0 16px' }}>
@@ -248,7 +293,7 @@ function ScanResultLayout({
 
       {totalPlayers != null && (
         <QuestFooter>
-          <button className="btn ghost">Полное табло · {totalPlayers} участников →</button>
+          <button className="btn ghost">Полное табло · {pluralParticipants(totalPlayers)} →</button>
         </QuestFooter>
       )}
     </div>
@@ -350,7 +395,7 @@ function defaultBoardSlice(myNick) {
 // centered on the player's row, so the table is right there.
 
 // State: ok (positive delta)
-function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
+function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return <ScanResultLayout
     user={user || 'r00t_kit'}
     score={score != null ? score : 310}
@@ -363,12 +408,13 @@ function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boa
     boardSlice={boardSlice || defaultBoardSlice(user)}
     boardTimer={boardTimer || ''}
     boardTimerLabel={boardTimerLabel || 'до конца'}
+    timerTarget={timerTarget}
     totalPlayers={totalPlayers}
   />;
 }
 
 // State: ok (negative delta)
-function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
+function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return <ScanResultLayout
     user={user || 'r00t_kit'}
     score={score != null ? score : 210}
@@ -381,12 +427,13 @@ function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, bo
     boardSlice={boardSlice || defaultBoardSlice(user)}
     boardTimer={boardTimer || ''}
     boardTimerLabel={boardTimerLabel || 'до конца'}
+    timerTarget={timerTarget}
     totalPlayers={totalPlayers}
   />;
 }
 
 // State: locked (tag already used)
-function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
+function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -400,6 +447,7 @@ function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
       boardSlice={boardSlice || defaultBoardSlice(user)}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
+      timerTarget={timerTarget}
       totalPlayers={totalPlayers}
     />
   );
@@ -407,7 +455,7 @@ function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
 
 // State: quest not started yet (countdown)
 // startsAt — ISO string of when the quest begins
-function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, startsAt, totalPlayers }) {
+function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, startsAt, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -421,6 +469,7 @@ function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
       strategy="ожидание · старт через"
       boardTimerLabel={boardTimerLabel || 'до старта'}
       boardTimer={boardTimer || ''}
+      timerTarget={timerTarget}
       boardEmpty="Сканирование ещё не открыто."
       totalPlayers={totalPlayers}
     />
@@ -477,7 +526,7 @@ function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLa
 }
 
 // State: unknown tag
-function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
+function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -492,13 +541,14 @@ function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLab
       boardSlice={boardSlice || defaultBoardSlice(user)}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
+      timerTarget={timerTarget}
       totalPlayers={totalPlayers}
     />
   );
 }
 
 // State: rate-limited
-function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, totalPlayers }) {
+function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return (
     <ScanResultLayout
       user={user || 'r00t_kit'}
@@ -513,6 +563,7 @@ function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerL
       boardSlice={boardSlice || defaultBoardSlice(user)}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
+      timerTarget={timerTarget}
       totalPlayers={totalPlayers}
     />
   );
@@ -538,7 +589,6 @@ function IconLock() {
 
 function ScreenScoreboardMobile({ initialData }) {
   const myNick = getLocalPlayer()?.nick || null;
-  const myScore = getLocalPlayer()?.points ?? 0;
 
   // scoreboard: array of { nick, points, rank } from backend
   const [scoreboard, setScoreboard] = React.useState(
@@ -605,7 +655,7 @@ function ScreenScoreboardMobile({ initialData }) {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      <QuestHeader user={myNick} score={myScore} />
+      <QuestHeader user={myNick} score={myNick ? (scoreboard.find(p => p.nick === myNick)?.points ?? 0) : 0} />
       <div style={{ flex: 1, overflow: 'auto', padding: '20px 20px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
           <div className="brak">live · табло</div>

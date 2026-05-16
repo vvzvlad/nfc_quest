@@ -95,23 +95,32 @@ function PlayerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tagId]);
 
-  // Calls scan API and transitions to 'result' (or 'error')
+  // Calls scan API and transitions to 'result' (or 'error').
+  // Run scan and scoreboard fetch in parallel to have all data ready for first render,
+  // so timerTarget is computed from real data on the very first render of the result screen.
   async function doScan(tag_id, player_id) {
     setPhase('scanning');
     try {
-      const { ok, status, data } = await api.scan(tag_id, player_id);
-      if (ok || status === 200) {
-        setScanResult(data);
-        setPhase('result');
-      } else {
-        // Non-2xx: store whatever the server returned and still show result screen
-        setScanResult(data);
-        setPhase('result');
+      const [scanRes, boardRes] = await Promise.allSettled([
+        api.scan(tag_id, player_id),
+        api.scoreboard(),
+      ]);
+
+      if (scanRes.status === 'rejected') {
+        setPhase('error');
+        return;
       }
-      // Load scoreboard after scan to populate leaderboard in result screens
-      api.scoreboard().then(r => {
-        if (r.ok) setScoreboardData(r.data);
-      }).catch(() => {});
+
+      const { data: scanData } = scanRes.value;
+
+      // Apply scoreboard data if available (may be absent if the request failed)
+      if (boardRes.status === 'fulfilled' && boardRes.value.ok) {
+        setScoreboardData(boardRes.value.data);
+      }
+
+      // Set scan result and transition to result screen — scoreboard data is already in state
+      setScanResult(scanData);
+      setPhase('result');
     } catch (err) {
       setPhase('error');
     }
@@ -183,18 +192,19 @@ function PlayerPage() {
     const myNick = player?.nick;
     const boardSlice = buildBoardSlice(scoreboardData?.players, myNick) || undefined;
     const game = scoreboardData?.game;
-    const boardTimer = game?.status === 'active' && game?.ends_at
-      ? (() => {
-          const diff = Math.max(0, new Date(game.ends_at).getTime() - Date.now());
-          const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
-          const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
-          const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
-          return `${h}:${m}:${s}`;
-        })()
-      : '';
+    // Extract the live countdown target as an ISO string; ScanResultLayout will tick it every second.
+    // For 'active' games count down to ends_at; for 'not_started' count down to starts_at.
+    const timerTarget = game?.status === 'active' && game?.ends_at
+      ? game.ends_at
+      : game?.status === 'not_started' && game?.starts_at
+      ? game.starts_at
+      : null;
+    const liveScore = myNick && scoreboardData?.players
+      ? scoreboardData.players.find(p => p.nick === myNick)?.points ?? player?.points
+      : player?.points;
     const commonProps = {
-      user: myNick, score: player?.points, tagId, boardSlice, boardTimer,
-      totalPlayers: scoreboardData?.stats?.total_players,  // pass total player count to result screens
+      user: myNick, score: liveScore, tagId, boardSlice, timerTarget,
+      totalPlayers: scoreboardData?.stats?.total_players,
     };
 
     if (status === 'ok') {
@@ -205,16 +215,13 @@ function PlayerPage() {
         delta: scanResult.delta,
         meta: scanResult.meta,
         strategyDisplay: scanResult.strategy_display,
-        boardSlice,
-        boardTimer,
-        totalPlayers: scoreboardData?.stats?.total_players,  // pass total player count to result screens
       };
       return delta >= 0
         ? <ScanSuccessPlus  {...commonScanProps} />
         : <ScanSuccessMinus {...commonScanProps} />;
     }
     if (status === 'locked')     return <ScanLocked   {...commonProps} />;
-    if (status === 'not_yet')    return <ScanNotYet   {...commonProps} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
+    if (status === 'not_yet')    return <ScanNotYet   {...commonProps} timerTarget={scanResult.starts_at} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
     if (status === 'finished')   return <ScanFinished {...commonProps} awardMessage={scanResult.award_message} />;
     if (status === 'rate_limit') return <ScanRateLimit {...commonProps} />;
     // Covers 'unknown' and any unexpected status values
