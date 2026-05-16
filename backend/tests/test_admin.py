@@ -27,6 +27,7 @@ class TestAdminAuth:
         ("DELETE", "/admin/api/players/nonexistent"),
         ("DELETE", "/admin/api/tags/nonexistent"),
         ("POST",   "/admin/api/tags/nonexistent/reset"),
+        ("PUT",    "/admin/api/tags/nonexistent"),
         ("POST",   "/admin/api/players/nonexistent/adjust"),
     ])
     def test_all_admin_routes_require_auth(self, client, method, path):
@@ -184,6 +185,74 @@ class TestAdminTags:
     # G-M6: Deleting a nonexistent tag returns 404 with error key
     def test_delete_nonexistent_tag_returns_404(self, admin_client):
         r = admin_client.delete("/admin/api/tags/ZZZZ-ZZZ")
+        assert r.status_code == 404
+        assert "error" in r.get_json()
+
+    # G-M10: Edit tag strategy_params changes the points awarded on next scan
+    def test_update_tag_strategy_params(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+        register_player(client, "player-gm10", "PlayerGM10")
+
+        # Scan with original params → 10 points
+        rate_limiter.clear()
+        r1 = scan_tag(client, "player-gm10", tag_id)
+        assert r1.get_json()["delta"] == 10
+
+        # Admin updates tag to 99 points
+        r_put = admin_client.put(
+            f"/admin/api/tags/{tag_id}",
+            json={"strategy_params": {"points": 99}},
+        )
+        assert r_put.status_code == 200
+        assert r_put.get_json()["strategy_params"]["points"] == 99
+
+        # Scan again → 99 points
+        rate_limiter.clear()
+        r2 = scan_tag(client, "player-gm10", tag_id)
+        assert r2.get_json()["delta"] == 99
+
+    # G-M11: Edit tag strategy (change from unlimited to one_time_per_player)
+    def test_update_tag_strategy(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "unlimited", {"points": 20})
+        tag_id = tags[0]["id"]
+        register_player(client, "player-gm11", "PlayerGM11")
+
+        # Scan unlimited tag twice — both succeed
+        rate_limiter.clear()
+        r1 = scan_tag(client, "player-gm11", tag_id)
+        assert r1.get_json()["status"] == "ok"
+        rate_limiter.clear()
+        r2 = scan_tag(client, "player-gm11", tag_id)
+        assert r2.get_json()["status"] == "ok"
+
+        # Admin changes strategy to one_time_per_player
+        r_put = admin_client.put(
+            f"/admin/api/tags/{tag_id}",
+            json={"strategy": "one_time_per_player"},
+        )
+        assert r_put.status_code == 200
+        assert r_put.get_json()["strategy"] == "one_time_per_player"
+
+        # Now third scan is locked (one_time_per_player, already scanned via TagPlayerScan...
+        # Actually TagPlayerScan doesn't have a record yet since previous scans were unlimited.
+        # So first scan after strategy change should succeed, second should lock.)
+        rate_limiter.clear()
+        r3 = scan_tag(client, "player-gm11", tag_id)
+        assert r3.get_json()["status"] == "ok"
+
+        rate_limiter.clear()
+        r4 = scan_tag(client, "player-gm11", tag_id)
+        assert r4.get_json()["status"] == "locked"
+
+    # G-M12: Edit nonexistent tag returns 404
+    def test_update_nonexistent_tag_returns_404(self, admin_client):
+        r = admin_client.put(
+            "/admin/api/tags/ZZZZ-ZZZ",
+            json={"strategy_params": {"points": 50}},
+        )
         assert r.status_code == 404
         assert "error" in r.get_json()
 

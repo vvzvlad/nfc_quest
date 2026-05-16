@@ -337,6 +337,27 @@ def create_tags_batch():
     return jsonify({"items": created}), 201
 
 
+@admin_api.route("/tags/<tag_id>", methods=["PUT"])
+@_require_admin
+def update_tag(tag_id):
+    """Update a tag's strategy, params, or label."""
+    tag = db.session.get(Tag, tag_id)
+    if tag is None:
+        return jsonify({"error": "Tag not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+
+    if "strategy" in data:
+        tag.strategy = data["strategy"]
+    if "strategy_params" in data:
+        tag.strategy_params = data["strategy_params"]
+    if "label" in data:
+        tag.label = data["label"] or None
+
+    db.session.commit()
+    return jsonify(tag.to_dict()), 200
+
+
 @admin_api.route("/tags/<tag_id>", methods=["DELETE"])
 @_require_admin
 def delete_tag(tag_id):

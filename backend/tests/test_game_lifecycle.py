@@ -56,6 +56,38 @@ class TestGameRestart:
         assert r3.get_json()["delta"] == 10
 
 
+class TestGameEdgeCases:
+    def test_starts_at_null_ends_at_set_means_not_started(self, client, admin_client):
+        """If starts_at is null but ends_at is set, game stays 'not_started' forever."""
+        admin_client.put(
+            "/admin/api/game",
+            json={"starts_at": None, "ends_at": "2099-12-31T00:00:00Z"},
+        )
+
+        register_player(client, "player-edge1", "EdgePlayer1")
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+
+        rate_limiter.clear()
+        r = scan_tag(client, "player-edge1", tag_id)
+        assert r.status_code == 200
+        assert r.get_json()["status"] == "not_yet"
+
+        # Scoreboard should also show not_started
+        sb = client.get("/api/scoreboard").get_json()
+        assert sb["game"]["status"] == "not_started"
+
+    def test_starts_at_null_ends_at_past_means_not_started(self, client, admin_client):
+        """Even if ends_at is in the past, null starts_at means not_started (not finished)."""
+        admin_client.put(
+            "/admin/api/game",
+            json={"starts_at": None, "ends_at": "2000-01-01T00:00:00Z"},
+        )
+
+        sb = client.get("/api/scoreboard").get_json()
+        assert sb["game"]["status"] == "not_started"
+
+
 class TestGameBoundary:
     def test_scan_just_before_game_ends(self, client, admin_client):
         """Scan during active game (far from end) should succeed."""
