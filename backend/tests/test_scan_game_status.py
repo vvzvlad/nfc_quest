@@ -73,6 +73,8 @@ class TestScanGameStatus:
         start_game(admin_client)
         r = client.post("/api/scan", json=payload)
         assert r.status_code == expected_status
+        if expected_status == 400:
+            assert r.get_json()["error"] == "MISSING_FIELDS"
 
     # S-M1b: Scan with wrong content-type returns 400
     def test_scan_wrong_content_type(self, client, admin_client):
@@ -113,3 +115,4 @@ class TestScanGameStatus:
         r2 = scan_tag(client, "player-b5", tag_id)
         assert r2.status_code == 429
         assert r2.get_json()["status"] == "rate_limit"
+        assert r2.get_json()["message"] == "RATE_LIMIT_WAIT"

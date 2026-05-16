@@ -33,6 +33,7 @@ class TestRegister:
         assert r2.status_code == 409
         body = r2.get_json()
         assert "error" in body
+        assert body["error"] == "NICK_TAKEN"
 
     # A4: Missing required fields → 400
     @pytest.mark.parametrize("payload", [
@@ -47,6 +48,7 @@ class TestRegister:
         assert r.status_code == 400
         body = r.get_json()
         assert "error" in body
+        assert body["error"] == "MISSING_FIELDS"
 
     # R-M1: SQLite doesn't enforce VARCHAR(64); a 100-char nick is accepted silently
     def test_register_nick_too_long(self, client):
@@ -90,6 +92,7 @@ class TestRegister:
         assert r.status_code == expected_status
         if expected_status == 403:
             assert "error" in r.get_json()
+            assert r.get_json()["error"] == "REGISTRATION_CLOSED"
 
     # R-M4: Sending wrong content type (text/plain) should return 400
     def test_register_wrong_content_type(self, client):

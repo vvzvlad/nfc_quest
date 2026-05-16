@@ -147,6 +147,8 @@ class TestE2EFlows:
         # Second immediate scan WITHOUT clearing rate_limiter — must be rate-limited
         r2 = scan_tag(client, "player-f5", tag_id)
         assert r2.status_code == 429
+        assert r2.get_json()["status"] == "rate_limit"
+        assert r2.get_json()["message"] == "RATE_LIMIT_WAIT"
 
     # F6: Registration is blocked when game has already finished
     # WILL FAIL — current code returns 201 regardless of game state
@@ -164,6 +166,7 @@ class TestE2EFlows:
         r = register_player(client, "player-f6", "PlayerF6")
         assert r.status_code == 403
         assert "error" in r.get_json()
+        assert r.get_json()["error"] == "REGISTRATION_CLOSED"
 
     # F7: award_message from game settings is returned in scan response when game is finished
     def test_award_message_in_scan_response_matches_admin_setting(self, client, admin_client):

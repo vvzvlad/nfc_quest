@@ -34,6 +34,7 @@ class TestAdminAuth:
         method_fn = getattr(client, method.lower())
         r = method_fn(path)
         assert r.status_code == 401, f"{method} {path} should return 401 without auth"
+        assert r.get_json()["error"] == "UNAUTHORIZED", f"{method} {path} should return UNAUTHORIZED error code"
 
     # G2: Login success/failure and /me endpoint
     def test_admin_login_success_and_failure(self, client):
@@ -58,6 +59,7 @@ class TestAdminAuth:
         # Wrong password → 401
         r_fail = client.post("/admin/api/login", json={"password": "wrongpass"})
         assert r_fail.status_code == 401
+        assert r_fail.get_json()["error"] == "WRONG_PASSWORD"
 
 
 class TestAdminGameControl:
@@ -186,7 +188,7 @@ class TestAdminTags:
     def test_delete_nonexistent_tag_returns_404(self, admin_client):
         r = admin_client.delete("/admin/api/tags/ZZZZ-ZZZ")
         assert r.status_code == 404
-        assert "error" in r.get_json()
+        assert r.get_json()["error"] == "TAG_NOT_FOUND"
 
     # G-M10: Edit tag strategy_params changes the points awarded on next scan
     def test_update_tag_strategy_params(self, client, admin_client):
@@ -254,7 +256,13 @@ class TestAdminTags:
             json={"strategy_params": {"points": 50}},
         )
         assert r.status_code == 404
-        assert "error" in r.get_json()
+        assert r.get_json()["error"] == "TAG_NOT_FOUND"
+
+    # G-M8: Resetting a nonexistent tag returns 404 with TAG_NOT_FOUND error code
+    def test_reset_nonexistent_tag_returns_404(self, admin_client):
+        r = admin_client.post("/admin/api/tags/ZZZZ-ZZZ/reset")
+        assert r.status_code == 404
+        assert r.get_json()["error"] == "TAG_NOT_FOUND"
 
     # G-M7: Resetting a tag allows a player to scan it again after being locked
     def test_reset_tag_allows_rescan(self, client, admin_client):
@@ -374,13 +382,20 @@ class TestAdminPlayers:
             "/admin/api/players/player-g6/adjust", json={"delta": "abc"}
         )
         assert r4.status_code == 400
-        assert "error" in r4.get_json()
+        assert r4.get_json()["error"] == "INVALID_DELTA"
+
+        # Adjust nonexistent player → 404 PLAYER_NOT_FOUND
+        r5 = admin_client.post(
+            "/admin/api/players/nonexistent-g6/adjust", json={"delta": 10}
+        )
+        assert r5.status_code == 404
+        assert r5.get_json()["error"] == "PLAYER_NOT_FOUND"
 
     # G-M5: Deleting a nonexistent player returns 404 with error key
     def test_delete_nonexistent_player_returns_404(self, admin_client):
         r = admin_client.delete("/admin/api/players/nonexistent-id")
         assert r.status_code == 404
-        assert "error" in r.get_json()
+        assert r.get_json()["error"] == "PLAYER_NOT_FOUND"
 
 
 class TestAdminScanLog:
@@ -502,7 +517,7 @@ class TestAdminGameValidation:
             },
         )
         assert r.status_code == 400
-        assert "error" in r.get_json()
+        assert r.get_json()["error"] == "GAME_END_BEFORE_START"
 
     # G-M1 sub-case 2: ends_at - starts_at < 10 minutes → 400 (WILL FAIL)
     def test_put_game_duration_too_short(self, admin_client):
@@ -514,7 +529,7 @@ class TestAdminGameValidation:
             },
         )
         assert r.status_code == 400
-        assert "error" in r.get_json()
+        assert r.get_json()["error"] == "GAME_TOO_SHORT"
 
     # G-M1 sub-case 3: ends_at - starts_at == 10 minutes exactly → 200
     # NOTE: currently passes because no validation exists yet.
