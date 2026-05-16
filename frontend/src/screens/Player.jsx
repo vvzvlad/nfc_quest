@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { QuestCtx } from '../QuestContext.js';
 import { connectSocket, disconnectSocket, getLocalPlayer, api } from '../api.js';
 
@@ -69,11 +70,19 @@ function QuestFooter({ children }) {
 //   tagId           — current tag ID shown in footer hint
 function ScreenRegistration({ onRegister, error, tagId }) {
   const [nick, setNick] = React.useState('');
+  const [localError, setLocalError] = React.useState(null);
 
   const handleSubmit = () => {
     const trimmed = nick.trim();
-    if (trimmed && onRegister) onRegister(trimmed);
+    if (!trimmed) {
+      setLocalError('Введите никнейм');
+      return;
+    }
+    setLocalError(null);
+    if (onRegister) onRegister(trimmed);
   };
+
+  const displayError = error || localError;
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') handleSubmit();
@@ -110,10 +119,9 @@ function ScreenRegistration({ onRegister, error, tagId }) {
             onKeyDown={handleKeyDown}
             placeholder="напр. r00t_kit"
           />
-          {/* Show error message in accent color when provided */}
-          {error && (
+          {displayError && (
             <div style={{ fontSize: 13, color: 'var(--accent)', marginTop: 4, lineHeight: 1.4 }}>
-              {error}
+              {displayError}
             </div>
           )}
         </div>
@@ -163,6 +171,7 @@ function ScanResultLayout({
   timerTarget,
   boardSlice, boardEmpty, totalPlayers,
 }) {
+  const navigate = useNavigate();
   // Live countdown from timerTarget ISO string; falls back to static boardTimer string
   const [liveTimer, setLiveTimer] = React.useState(
     () => timerTarget ? computeCountdown(timerTarget) : (boardTimer || '')
@@ -282,18 +291,20 @@ function ScanResultLayout({
         <div style={{ flex: 1, overflow: 'auto', padding: '0 16px' }}>
           {boardEmpty
             ? <BoardEmptyHint message={boardEmpty} />
-            : (boardSlice ?? []).map(([place, name, scoreVal, opts]) => (
-                <BoardSliceRow key={name + place}
-                  place={place} name={name} score={scoreVal}
-                  mine={opts?.mine} delta={opts?.delta} prevPlace={opts?.prevPlace} dim={opts?.dim} />
-              ))
+            : (boardSlice ?? []).map(([place, name, scoreVal, opts], i) =>
+                opts?.separator
+                  ? <BoardSeparatorRow key={`sep-${i}`} />
+                  : <BoardSliceRow key={name + place}
+                      place={place} name={name} score={scoreVal}
+                      mine={opts?.mine} delta={opts?.delta} prevPlace={opts?.prevPlace} dim={opts?.dim} />
+              )
           }
         </div>
       </div>
 
       {totalPlayers != null && (
         <QuestFooter>
-          <button className="btn ghost">Полное табло · {pluralParticipants(totalPlayers)} →</button>
+          <button className="btn ghost" onClick={() => navigate('/scoreboard')}>Полное табло · {pluralParticipants(totalPlayers)} →</button>
         </QuestFooter>
       )}
     </div>
@@ -352,6 +363,20 @@ function BoardSliceRow({ place, name, score, mine, delta, prevPlace, dim }) {
   );
 }
 
+function BoardSeparatorRow() {
+  return (
+    <div style={{
+      padding: '4px 6px',
+      borderTop: '1px solid var(--line)',
+      textAlign: 'center',
+      fontFamily: 'var(--font-mono)',
+      fontSize: 11,
+      color: 'var(--muted-2)',
+      letterSpacing: '0.2em',
+    }}>···</div>
+  );
+}
+
 function BoardEmptyHint({ message }) {
   return (
     <div style={{
@@ -403,7 +428,6 @@ function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boa
     tone="plus"
     hero={delta != null ? (delta >= 0 ? `+${delta}` : `${delta}`) : '+?'}
     sub={strategyDisplay || 'Спрятанная метка. Лежала под чёрной доской.'}
-    strategy={strategyDisplay || 'hidden · fixed +50'}
     meta={meta || ''}
     boardSlice={boardSlice || defaultBoardSlice(user)}
     boardTimer={boardTimer || ''}
@@ -422,7 +446,6 @@ function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, bo
     tone="minus"
     hero={delta != null ? String(delta) : '-?'}
     sub={strategyDisplay || 'Эта метка отнимает баллы. Не повезло.'}
-    strategy={strategyDisplay || 'ловушка · penalty −30'}
     meta={meta || ''}
     boardSlice={boardSlice || defaultBoardSlice(user)}
     boardTimer={boardTimer || ''}
@@ -710,7 +733,7 @@ function BoardRow({ place, name, score, mine }) {
         fontFamily: 'var(--font-mono)', fontSize: 14,
         color: mine ? 'var(--fg)' : 'var(--fg-2)',
         fontWeight: mine ? 600 : 400,
-      }}>{name}{mine && <span style={{ color: 'var(--accent)', marginLeft: 6, fontSize: 10 }}>· вы</span>}</div>
+      }}>{name}{mine && <span style={{ color: 'var(--accent)', marginLeft: 6, fontSize: 10 }}>· ВЫ</span>}</div>
       <div className="tabular" style={{
         fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 600,
         color: 'var(--fg)',

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { QuestCtx } from '../QuestContext.js';
 import { CornerBrackets } from './Player.jsx';
 import { Stat } from './Hall.jsx';
@@ -6,6 +7,19 @@ import { adminApi } from '../api.js';
 
 // Admin.jsx — Admin panel (5 screens)
 // Linear/Notion-density: persistent sidebar + dense content.
+
+function downloadCSV(filename, headers, rows) {
+  const escape = (v) => {
+    const s = String(v ?? '');
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers.map(escape).join(','), ...rows.map(r => r.map(escape).join(','))].join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 
 function AdminShell({ section, title, breadcrumb, actions, children, login = false }) {
   if (login) {
@@ -43,6 +57,7 @@ function AdminShell({ section, title, breadcrumb, actions, children, login = fal
 
 function AdminSidebar({ active }) {
   const QUEST = React.useContext(QuestCtx);
+  const navigate = useNavigate();
   const [stats, setStats] = React.useState({});
   const [game, setGame] = React.useState({});
   // Countdown timer tick (seconds) to force re-render each second
@@ -137,7 +152,7 @@ function AdminSidebar({ active }) {
 
       {sections.map(s => (
         <div key={s.id}
-          onClick={() => { window.location.href = `/admin/${s.id}`; }}
+          onClick={() => navigate(`/admin/${s.id}`)}
           style={{
           display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: 8,
           padding: '7px 8px',
@@ -175,7 +190,7 @@ function AdminSidebar({ active }) {
         </div>
         <div className="mono" style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
           <span>admin@metascan</span>
-          <span onClick={() => adminApi.logout().then(() => { window.location.href = '/admin/login'; })} style={{ cursor: 'pointer' }}>выйти</span>
+          <span onClick={() => adminApi.logout().then(() => { window.location.href = '/admin/login'; })} style={{ cursor: 'pointer' }}>выход</span>
         </div>
       </div>
     </div>
@@ -206,6 +221,7 @@ function AdminTopBar({ breadcrumb, actions }) {
 // ─── Screen 4: Admin login ──────────────────────────────────────
 function ScreenAdminLogin() {
   const QUEST = React.useContext(QuestCtx);
+  const navigate = useNavigate();
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
@@ -215,9 +231,9 @@ function ScreenAdminLogin() {
     setError(null);
     const res = await adminApi.login(password);
     if (res.ok) {
-      window.location.href = '/admin';
+      navigate('/admin');
     } else {
-      setError('Неверный пароль');
+      setError(res.data?.error || 'Неверный пароль');
     }
     setLoading(false);
   };
@@ -517,21 +533,24 @@ function ScreenAdminTags() {
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(1);
+  const [search, setSearch] = React.useState('');
   const [showCreate, setShowCreate] = React.useState(false);
-  // Currently selected tag for the detail panel
   const [selectedTag, setSelectedTag] = React.useState(null);
+  const [exportingTags, setExportingTags] = React.useState(false);
   const perPage = 50;
 
   const loadTags = React.useCallback(() => {
     setLoading(true);
-    adminApi.getTags({ page, per_page: perPage }).then(r => {
+    const params = { page, per_page: perPage };
+    if (search.trim()) params.search = search.trim();
+    adminApi.getTags(params).then(r => {
       if (r.ok) {
         setTags(r.data.items || []);
         setTotal(r.data.total || 0);
       }
       setLoading(false);
     });
-  }, [page]);
+  }, [page, search]);
 
   React.useEffect(() => { loadTags(); }, [loadTags]);
 
@@ -562,7 +581,22 @@ function ScreenAdminTags() {
       section="tags"
       breadcrumb={['Конференция', 'Метки']}
       actions={<>
-        <button className="btn ghost sm">Экспорт CSV</button>
+        <button className="btn ghost sm" disabled={exportingTags} onClick={() => {
+          setExportingTags(true);
+          adminApi.getTags({ page: 1, per_page: 9999 }).then(r => {
+            if (r.ok) {
+              const items = r.data.items || [];
+              downloadCSV('tags.csv',
+                ['tag_id', 'label', 'strategy', 'params', 'scans', 'unique_players'],
+                items.map(t => {
+                  const sp = t.strategy_params || {};
+                  const params = t.strategy === 'random' ? `${sp.min}…${sp.max}` : String(sp.points ?? '');
+                  return [t.id, t.label || '', t.strategy, params, t.scan_count ?? 0, t.unique_players_count ?? 0];
+                })
+              );
+            }
+          }).finally(() => setExportingTags(false)); // reset flag even on network error
+        }}>{exportingTags ? 'Экспорт…' : 'Экспорт CSV'}</button>
         <button className="btn sm" onClick={() => setShowCreate(true)}>+ создать пачку</button>
       </>}
     >
@@ -573,9 +607,8 @@ function ScreenAdminTags() {
           <div style={{ padding: '10px 24px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <div className="brak" style={{ fontSize: 11 }}>все метки · {total}</div>
-              <input className="input sm" placeholder="tag_id или label" style={{ width: 220 }} />
-              <FilterChip label="стратегия: все" />
-              <FilterChip label="статус: all" />
+              <input className="input sm" placeholder="tag_id или label" style={{ width: 220 }}
+                value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
             </div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
               {loading ? 'загрузка…' : `${tags.length} из ${total}`}
@@ -849,7 +882,6 @@ function ScreenAdminTagsCreate({ onBack }) {
       breadcrumb={['Конференция', 'Метки', 'Создание']}
       actions={<>
         <button className="btn ghost sm" onClick={onBack}>← Назад к таблице</button>
-        <button className="btn ghost sm">Печать листа</button>
         {!created && <button className="btn sm" onClick={handleCreate} disabled={loading}>{loading ? 'Создаём…' : `+ ещё пачка`}</button>}
       </>}
     >
@@ -912,8 +944,10 @@ function ScreenAdminTagsCreate({ onBack }) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn ghost sm">скопировать все</button>
-                  <button className="btn ghost sm">экспорт TXT</button>
+                  <button className="btn ghost sm" onClick={() => {
+                    const text = created.map(item => item.url).join('\n');
+                    navigator.clipboard?.writeText(text);
+                  }}>скопировать все</button>
                 </div>
               </div>
 
@@ -1050,18 +1084,22 @@ function ScreenAdminPlayers() {
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(1);
+  const [search, setSearch] = React.useState('');
+  const [exportingPlayers, setExportingPlayers] = React.useState(false);
   const perPage = 50;
 
   const loadPlayers = React.useCallback(() => {
     setLoading(true);
-    adminApi.getPlayers({ page, per_page: perPage }).then(r => {
+    const params = { page, per_page: perPage };
+    if (search.trim()) params.search = search.trim();
+    adminApi.getPlayers(params).then(r => {
       if (r.ok) {
         setPlayers(r.data.items || []);
         setTotal(r.data.total || 0);
       }
       setLoading(false);
     });
-  }, [page]);
+  }, [page, search]);
 
   React.useEffect(() => { loadPlayers(); }, [loadPlayers]);
 
@@ -1089,8 +1127,18 @@ function ScreenAdminPlayers() {
       section="players"
       breadcrumb={['Конференция', 'Участники']}
       actions={<>
-        <button className="btn ghost sm">Экспорт CSV</button>
-        <button className="btn sm">+ ручная регистрация</button>
+        <button className="btn ghost sm" disabled={exportingPlayers} onClick={() => {
+          setExportingPlayers(true);
+          adminApi.getPlayers({ page: 1, per_page: 9999 }).then(r => {
+            if (r.ok) {
+              const items = r.data.items || [];
+              downloadCSV('players.csv',
+                ['nick', 'uuid', 'points', 'scans', 'registered_at'],
+                items.map(p => [p.nick, p.id, p.points ?? 0, p.scan_count ?? 0, p.registered_at || ''])
+              );
+            }
+          }).finally(() => setExportingPlayers(false)); // reset flag even on network error
+        }}>{exportingPlayers ? 'Экспорт…' : 'Экспорт CSV'}</button>
       </>}
     >
       <div style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1105,8 +1153,8 @@ function ScreenAdminPlayers() {
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
               <div className="brak" style={{ fontSize: 11 }}>участники</div>
-              <input className="input sm" placeholder="ник или UUID" style={{ width: 260 }} />
-              <FilterChip label="онлайн: все" />
+              <input className="input sm" placeholder="ник или UUID" style={{ width: 260 }}
+                value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
             </div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
               {loading ? 'загрузка…' : 'сорт: баллы ↓'}
@@ -1207,18 +1255,11 @@ function ScreenAdminLog() {
           <span className="live-dot" style={{ marginRight: 8, transform: 'translateY(-1px)' }}/>
           stream · sse
         </span>
-        <button className="btn ghost sm">Экспорт</button>
       </>}
     >
       <div style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* filters */}
-        <div style={{ border: '1px solid var(--line)', background: 'var(--bg-2)', padding: '12px 16px', display: 'flex', gap: 16, alignItems: 'center' }}>
-          <div className="brak" style={{ fontSize: 11 }}>фильтры</div>
-          <Field label="" hint=""><SelectFake value="участник: все" /></Field>
-          <Field label="" hint=""><SelectFake value="метка: все" /></Field>
-          <Field label="" hint=""><SelectFake value="статус: все" /></Field>
-          <input className="input sm" placeholder="поиск по тексту" style={{ width: 220 }} />
-          <span style={{ flex: 1 }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="brak" style={{ fontSize: 11 }}>лог событий</div>
           <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
             {loading ? 'загрузка…' : `результатов · ${total}`}
           </span>

@@ -2,6 +2,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify
 from models import db, Player, Tag, ScanEvent, GameSettings, TagPlayerScan
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 from strategies import get_strategy
 
 game_api = Blueprint("game_api", __name__)
@@ -222,8 +223,25 @@ def scoreboard():
 
     # scans_per_minute: count ScanEvents in last 5 minutes
     five_min_ago = now.replace(tzinfo=None) - timedelta(minutes=5)
-    recent_scans = db.session.query(ScanEvent).filter(ScanEvent.scanned_at >= five_min_ago).count()
-    scans_per_minute = round(recent_scans / 5.0, 1)
+    recent_scans_count = db.session.query(ScanEvent).filter(ScanEvent.scanned_at >= five_min_ago).count()
+    scans_per_minute = round(recent_scans_count / 5.0, 1)
+
+    recent_events = (
+        db.session.query(ScanEvent)
+        .options(joinedload(ScanEvent.player))  # eagerly load player to avoid N+1 queries
+        .filter(ScanEvent.result == "ok")
+        .order_by(ScanEvent.scanned_at.desc())
+        .limit(10)
+        .all()
+    )
+    recent_scans_data = [
+        {
+            "nick": ev.player.nick if ev.player else ev.player_id,
+            "tag_id": ev.tag_id,
+            "delta": ev.delta_points,
+        }
+        for ev in recent_events
+    ]
 
     return jsonify({
         "players": players_data,
@@ -233,4 +251,5 @@ def scoreboard():
             "total_tags": total_tags,
             "scans_per_minute": scans_per_minute,
         },
+        "recent_scans": recent_scans_data,
     }), 200

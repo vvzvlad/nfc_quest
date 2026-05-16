@@ -23,6 +23,7 @@ function ScreenHallScoreboard() {
         setPlayers(r.data.players || []);
         setGameInfo(r.data.game || null);
         setStats(r.data.stats || {});
+        if (r.data.recent_scans) setRecentScans(r.data.recent_scans);
       }
     });
   }, []);
@@ -33,6 +34,7 @@ function ScreenHallScoreboard() {
       setPlayers(data.players || []);
       setGameInfo(data.game || null);
       setStats(data.stats || {});
+      if (data.recent_scans) setRecentScans(data.recent_scans);
     });
     return () => disconnectSocket();
   }, []);
@@ -72,7 +74,7 @@ function ScreenHallScoreboard() {
     ? [
         gameInfo.starts_at && `старт · ${new Date(gameInfo.starts_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
         gameInfo.ends_at && `финиш · ${new Date(gameInfo.ends_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
-        gameInfo.award_message && `награждение · ${gameInfo.award_message}`,
+        gameInfo.status === 'finished' && gameInfo.award_message && `награждение · ${gameInfo.award_message}`,
       ].filter(Boolean).join(' · ')
     : '';
 
@@ -283,7 +285,7 @@ function HallRow({ place, name, score, mine }) {
       <div style={{
         fontFamily: 'var(--font-mono)', fontSize: 18, color: mine ? 'var(--fg)' : 'var(--fg-2)',
         fontWeight: mine ? 600 : 400,
-      }}>{name}{mine && <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 12 }}>· YOU</span>}</div>
+      }}>{name}{mine && <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 12 }}>· ВЫ</span>}</div>
       <div className="tabular" style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: 'var(--fg)' }}>{score}</div>
     </div>
   );

@@ -2,20 +2,28 @@ import React from 'react';
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { QuestCtx } from './QuestContext.js';
 import { getLocalPlayer, setLocalPlayer, api } from './api.js';
-
 import {
   ScreenRegistration,
   ScanSuccessPlus, ScanSuccessMinus, ScanLocked, ScanNotYet,
   ScanFinished, ScanUnknown, ScanRateLimit,
   ScreenScoreboardMobile,
 } from './screens/Player.jsx';
-
 import { ScreenHallScoreboard } from './screens/Hall.jsx';
-
 import {
   ScreenAdminLogin, ScreenAdminGame, ScreenAdminTags,
   ScreenAdminPlayers, ScreenAdminLog,
 } from './screens/Admin.jsx';
+
+// generateUUID must come AFTER all imports (ESM rule: imports must be at top of file)
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback for environments without crypto.randomUUID (e.g. old Safari)
+  return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
+    (+c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (+c >> 2)))).toString(16)
+  );
+}
 
 // ─── Layout hosts ─────────────────────────────────────────────────────────────
 
@@ -126,38 +134,64 @@ function PlayerPage() {
     }
   }
 
-  // Build a boardSlice array centered around the current player for ScanResultLayout.
-  // Format: [place, nick, points, opts?]
   function buildBoardSlice(players, myNick) {
     if (!players || players.length === 0) return null;
     const myIdx = players.findIndex(p => p.nick === myNick);
-    const center = myIdx >= 0 ? myIdx : 0;
-    const start = Math.max(0, center - 2);
-    const slice = players.slice(start, start + 5);
-    return slice.map(p => [p.rank, p.nick, p.points, p.nick === myNick ? { mine: true } : undefined]);
+    const toRow = (p) => [p.rank, p.nick, p.points, p.nick === myNick ? { mine: true } : undefined];
+    const sepRow = [null, null, null, { separator: true }];
+
+    if (players.length <= 7) {
+      return players.map(toRow);
+    }
+
+    const rows = [];
+    const top3 = players.slice(0, 3).map(toRow);
+    rows.push(...top3);
+
+    const playerPos = myIdx >= 0 ? myIdx : 0;
+    const lastIdx = players.length - 1;
+
+    if (playerPos <= 3) {
+      rows.push(toRow(players[3]));
+      if (playerPos === 3) rows.push(toRow(players[4]));
+      rows.push(sepRow);
+      rows.push(toRow(players[lastIdx]));
+    } else if (playerPos >= lastIdx - 1) {
+      rows.push(sepRow);
+      if (playerPos === lastIdx - 1) rows.push(toRow(players[playerPos - 1]));
+      rows.push(toRow(players[playerPos]));
+      if (playerPos !== lastIdx) rows.push(toRow(players[lastIdx]));
+    } else {
+      rows.push(sepRow);
+      rows.push(toRow(players[playerPos - 1]));
+      rows.push(toRow(players[playerPos]));
+      rows.push(toRow(players[playerPos + 1]));
+      if (playerPos + 1 < lastIdx) {
+        rows.push(sepRow);
+        rows.push(toRow(players[lastIdx]));
+      }
+    }
+
+    return rows;
   }
 
   // Called by ScreenRegistration when the user submits the nick form
   async function onRegister(nick) {
     setRegistrationError(null);
-    const player_id = crypto.randomUUID();
-    const { ok, status, data } = await api.register(player_id, nick);
+    try {
+      const player_id = generateUUID();
+      const { ok, status, data } = await api.register(player_id, nick);
 
-    if (!ok) {
-      if (status === 409) {
-        // Nick already taken — surface error to registration screen
-        setRegistrationError(data.error || 'Никнейм уже занят');
-      } else {
+      if (!ok) {
         setRegistrationError(data.error || 'Ошибка регистрации');
+        return;
       }
-      return;
+
+      setLocalPlayer({ player_id, nick, points: data.points ?? 0 });
+      await doScan(tagId, player_id);
+    } catch (err) {
+      setRegistrationError('Ошибка регистрации. Попробуйте ещё раз.');
     }
-
-    // Registration succeeded — persist player locally
-    setLocalPlayer({ player_id, nick, points: data.points ?? 0 });
-
-    // Immediately scan the tag
-    await doScan(tagId, player_id);
   }
 
   // ── Render branch ──────────────────────────────────────────────────────────
