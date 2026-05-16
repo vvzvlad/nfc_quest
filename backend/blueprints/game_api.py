@@ -14,6 +14,12 @@ rate_limiter: dict[str, datetime] = {}
 RATE_LIMIT_SECONDS = 1
 RATE_LIMIT_CLEANUP_AGE = 10  # seconds; entries older than this are purged
 
+# Pre-compiled UUID regex for player_id validation
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
 
 def _cleanup_rate_limiter():
     """Remove stale entries from the rate limiter dict."""
@@ -50,10 +56,6 @@ def register():
         return jsonify({"error": "MISSING_FIELDS"}), 400
 
     # Validate player_id is a well-formed UUID
-    _UUID_RE = re.compile(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        re.IGNORECASE,
-    )
     if not _UUID_RE.match(player_id):
         return jsonify({"error": "INVALID_PLAYER_ID"}), 400
 
@@ -114,6 +116,9 @@ def scan():
 
     if not tag_id or not player_id:
         return jsonify({"error": "MISSING_FIELDS"}), 400
+
+    if not _UUID_RE.match(player_id):
+        return jsonify({"error": "INVALID_PLAYER_ID"}), 400
 
     # --- Rate limit check ---
     now = datetime.now(timezone.utc)
@@ -264,7 +269,6 @@ def scoreboard():
     recent_scans_data = [
         {
             "nick": ev.player.nick if ev.player else (ev.player_id or "<deleted>"),
-            "tag_id": ev.tag_id,
             "delta": ev.delta_points,
         }
         for ev in recent_events

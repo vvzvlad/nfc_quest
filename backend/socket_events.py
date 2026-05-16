@@ -66,7 +66,6 @@ def _build_scoreboard_data() -> dict:
     recent_scans_data = [
         {
             "nick": ev.player.nick if ev.player else (ev.player_id or "<deleted>"),
-            "tag_id": ev.tag_id,
             "delta": ev.delta_points,
         }
         for ev in recent_events

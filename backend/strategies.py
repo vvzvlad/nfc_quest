@@ -65,19 +65,6 @@ class OneTimePerPlayerStrategy(ScoringStrategy):
         return points, "ok"
 
 
-class UnlimitedStrategy(ScoringStrategy):
-    """
-    Always awards a fixed number of points, no restrictions.
-    strategy_params: {"points": N}
-    """
-
-    name = "unlimited"
-
-    def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
-        points = int((tag.strategy_params or {}).get("points", 0))
-        return points, "ok"
-
-
 class RandomStrategy(ScoringStrategy):
     """
     Awards a random number of points within [min, max].
@@ -103,15 +90,12 @@ STRATEGIES: dict[str, ScoringStrategy] = {
     for s in [
         OneTimeGlobalStrategy(),
         OneTimePerPlayerStrategy(),
-        UnlimitedStrategy(),
         RandomStrategy(),
     ]
 }
 
-# Aliases: "fixed" and "penalty" map to existing strategies for UI compatibility
-STRATEGIES["fixed"] = STRATEGIES["unlimited"]
+# Aliases for UI compatibility
 STRATEGIES["oneshot"] = STRATEGIES["one_time_global"]
-STRATEGIES["penalty"] = STRATEGIES["unlimited"]
 
 
 def get_strategy(name: str) -> ScoringStrategy | None:

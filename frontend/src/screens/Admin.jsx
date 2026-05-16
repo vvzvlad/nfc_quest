@@ -635,11 +635,9 @@ function ScreenAdminTags() {
               {tags.map((t, i) => {
                 // Build params display from strategy_params object returned by API
                 const sp = t.strategy_params || {};
-                const params = t.strategy === 'fixed' ? `+${sp.points ?? '?'}`
-                  : t.strategy === 'penalty' ? `-${sp.points ?? '?'}`
-                  : t.strategy === 'random' ? `+${sp.min ?? sp.min_points ?? '?'}…+${sp.max ?? sp.max_points ?? '?'}`
-                  : t.strategy === 'oneshot' ? `+${sp.points ?? '?'}`
-                  : t.strategy === 'transfer' ? `±${sp.points ?? '?'}`
+                const params = t.strategy === 'random' ? `+${sp.min ?? sp.min_points ?? '?'}…+${sp.max ?? sp.max_points ?? '?'}`
+                  : t.strategy === 'oneshot' || t.strategy === 'one_time_global' ? `+${sp.points ?? '?'}`
+                  : t.strategy === 'one_time_per_player' ? `+${sp.points ?? '?'}`
                   : '—';
                 return (
                   <tr key={t.id}
@@ -748,8 +746,6 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
 
   const sp = tag.strategy_params || {};
   const paramsDisplay = (() => {
-    if (tag.strategy === 'fixed' || tag.strategy === 'unlimited') return `+${sp.points ?? '?'}`;
-    if (tag.strategy === 'penalty') return `-${sp.points ?? '?'}`;
     if (tag.strategy === 'random') return `${sp.min ?? '?'}…${sp.max ?? '?'}`;
     if (tag.strategy === 'oneshot' || tag.strategy === 'one_time_global') return `+${sp.points ?? '?'}`;
     if (tag.strategy === 'one_time_per_player') return `+${sp.points ?? '?'}`;
@@ -772,12 +768,9 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
           </Field>
           <Field label="стратегия">
             <select className="input" value={editStrategy} onChange={e => setEditStrategy(e.target.value)} style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>
-              <option value="unlimited">unlimited</option>
               <option value="one_time_global">one_time_global</option>
               <option value="one_time_per_player">one_time_per_player</option>
               <option value="random">random</option>
-              <option value="fixed">fixed</option>
-              <option value="penalty">penalty</option>
               <option value="oneshot">oneshot</option>
             </select>
           </Field>
@@ -850,7 +843,7 @@ function KVList({ items }) {
 
 // ─── Screen 6b: Tag batch creation ─────────────────────────────
 function ScreenAdminTagsCreate({ onBack }) {
-  const [strategy, setStrategy] = React.useState('fixed');
+  const [strategy, setStrategy] = React.useState('one_time_per_player');
   const [points, setPoints] = React.useState('50');
   const [labelPrefix, setLabelPrefix] = React.useState('hall · ');
   const [count, setCount] = React.useState('12');
@@ -899,11 +892,9 @@ function ScreenAdminTagsCreate({ onBack }) {
               onChange={e => setStrategy(e.target.value)}
               style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
             >
-              <option value="fixed">fixed · фиксированные баллы</option>
+              <option value="one_time_per_player">one_time_per_player · раз на игрока</option>
               <option value="random">random · случайные баллы</option>
-              <option value="penalty">penalty · штраф</option>
-              <option value="oneshot">oneshot · одноразовая</option>
-              <option value="transfer">transfer · перевод</option>
+              <option value="oneshot">oneshot · одноразовая глобально</option>
             </select>
           </Field>
           <Field label="баллы">
@@ -1001,11 +992,10 @@ function SelectFake({ value }) {
 
 function StrategyChip({ s }) {
   const map = {
-    fixed:    { c: 'var(--info)',    l: 'fixed'    },
-    random:   { c: 'var(--warn)',    l: 'random'   },
-    penalty:  { c: 'var(--accent)',  l: 'penalty'  },
-    oneshot:  { c: 'var(--success)', l: 'oneshot'  },
-    transfer: { c: 'var(--gold)',    l: 'transfer' },
+    one_time_global:     { c: 'var(--success)', l: 'one_time_global' },
+    one_time_per_player: { c: 'var(--info)',    l: 'per_player'      },
+    random:              { c: 'var(--warn)',    l: 'random'          },
+    oneshot:             { c: 'var(--success)', l: 'oneshot'         },
   };
   const m = map[s] || { c: 'var(--muted)', l: String(s || '—') };
   return (
@@ -1284,7 +1274,7 @@ function ScreenAdminLog() {
                     <td style={{ padding: '5px 12px', color: 'var(--muted)' }}>{fmtTime(item.scanned_at)}</td>
                     <td style={{ padding: '5px 12px', color: 'var(--fg)' }}>{item.player_nick || '—'}</td>
                     <td style={{ padding: '5px 12px', color: 'var(--fg-2)' }}>{item.tag_id || '—'}</td>
-                    <td style={{ padding: '5px 12px' }}><StrategyChip s={item.strategy || 'fixed'} /></td>
+                    <td style={{ padding: '5px 12px' }}><StrategyChip s={item.strategy || '—'} /></td>
                     <td style={{ padding: '5px 12px', color: isNeg ? 'var(--accent)' : isPos ? 'var(--success)' : 'var(--muted)' }} className="tabular">{delta}</td>
                     <td style={{ padding: '5px 12px', color: 'var(--fg)' }} className="tabular">{item.player_total_after ?? '—'}</td>
                     <td style={{ padding: '5px 12px' }}>

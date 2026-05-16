@@ -206,7 +206,6 @@ function ScreenHallScoreboard() {
                 {i > 0 && <span style={{ color: 'var(--muted-2)' }}>·</span>}
                 <span>
                   <b style={{ color: 'var(--fg)' }}>{scan.nick}</b>
-                  {' ← TAG '}{scan.tag_id}
                   {' '}
                   <span style={{ color: scan.delta >= 0 ? 'var(--success)' : 'var(--accent)' }}>
                     {scan.delta >= 0 ? '+' : ''}{scan.delta}
