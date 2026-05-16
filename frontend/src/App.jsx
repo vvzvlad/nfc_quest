@@ -1,7 +1,7 @@
 import React from 'react';
-import { Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams, Outlet } from 'react-router-dom';
 import { QuestCtx } from './QuestContext.js';
-import { getLocalPlayer, setLocalPlayer, api } from './api.js';
+import { getLocalPlayer, setLocalPlayer, api, adminApi } from './api.js';
 import { getErrorMessage } from './i18n.js';
 import {
   ScreenRegistration,
@@ -105,30 +105,24 @@ function PlayerPage() {
   }, [tagId]);
 
   // Calls scan API and transitions to 'result' (or 'error').
-  // Run scan and scoreboard fetch in parallel to have all data ready for first render,
-  // so timerTarget is computed from real data on the very first render of the result screen.
   async function doScan(tag_id, player_id) {
     setPhase('scanning');
     try {
-      const [scanRes, boardRes] = await Promise.allSettled([
-        api.scan(tag_id, player_id),
-        api.scoreboard(),
-      ]);
+      const scanRes = await api.scan(tag_id, player_id);
 
-      if (scanRes.status === 'rejected') {
+      if (!scanRes.ok) {
         setPhase('error');
         return;
       }
 
-      const { data: scanData } = scanRes.value;
+      const scanData = scanRes.data;
+      setScanResult(scanData);
 
-      // Apply scoreboard data if available (may be absent if the request failed)
-      if (boardRes.status === 'fulfilled' && boardRes.value.ok) {
-        setScoreboardData(boardRes.value.data);
+      const boardRes = await api.scoreboard();
+      if (boardRes.ok) {
+        setScoreboardData(boardRes.data);
       }
 
-      // Set scan result and transition to result screen — scoreboard data is already in state
-      setScanResult(scanData);
       setPhase('result');
     } catch (err) {
       setPhase('error');
@@ -266,6 +260,28 @@ function PlayerPage() {
   return null;
 }
 
+// ─── RequireAuth ──────────────────────────────────────────────────────────────
+
+// RequireAuth: checks session validity before rendering admin content.
+// Renders null while the check is in-flight, redirects to /admin/login if not authenticated.
+function RequireAuth() {
+  const [authChecked, setAuthChecked] = React.useState(false);
+  const [authenticated, setAuthenticated] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false; // cleanup flag to avoid state updates on unmounted component
+    adminApi.me()
+      .then(r => { if (!cancelled) setAuthenticated(r.ok && r.data?.authenticated === true); })
+      .catch(() => { if (!cancelled) setAuthenticated(false); }) // Network error: treat as unauthenticated
+      .finally(() => { if (!cancelled) setAuthChecked(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!authChecked) return null; // blank while checking
+  if (!authenticated) return <Navigate to="/admin/login" replace />;
+  return <Outlet />; // renders the matched child route
+}
+
 // ─── App (root router) ────────────────────────────────────────────────────────
 
 export default function App() {
@@ -286,12 +302,14 @@ export default function App() {
         <Route path="/hall" element={<ScaleHost width={1920} height={1080}><ScreenHallScoreboard /></ScaleHost>} />
 
         {/* Admin screens — full viewport, no fixed canvas */}
-        <Route path="/admin/login"   element={<AdminHost><ScreenAdminLogin /></AdminHost>} />
-        <Route path="/admin"         element={<AdminHost><ScreenAdminGame /></AdminHost>} />
-        <Route path="/admin/game"    element={<AdminHost><ScreenAdminGame /></AdminHost>} />
-        <Route path="/admin/tags"    element={<AdminHost><ScreenAdminTags /></AdminHost>} />
-        <Route path="/admin/players" element={<AdminHost><ScreenAdminPlayers /></AdminHost>} />
-        <Route path="/admin/log"     element={<AdminHost><ScreenAdminLog /></AdminHost>} />
+        <Route path="/admin/login" element={<AdminHost><ScreenAdminLogin /></AdminHost>} />
+        <Route element={<AdminHost><RequireAuth /></AdminHost>}>
+          <Route path="/admin"         element={<ScreenAdminGame />} />
+          <Route path="/admin/game"    element={<ScreenAdminGame />} />
+          <Route path="/admin/tags"    element={<ScreenAdminTags />} />
+          <Route path="/admin/players" element={<ScreenAdminPlayers />} />
+          <Route path="/admin/log"     element={<ScreenAdminLog />} />
+        </Route>
       </Routes>
     </QuestCtx.Provider>
   );

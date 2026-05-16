@@ -229,14 +229,14 @@ def scoreboard():
     recent_events = (
         db.session.query(ScanEvent)
         .options(joinedload(ScanEvent.player))  # eagerly load player to avoid N+1 queries
-        .filter(ScanEvent.result == "ok")
+        .filter(ScanEvent.result == "ok", ScanEvent.player_id.isnot(None))  # exclude orphaned events (deleted players)
         .order_by(ScanEvent.scanned_at.desc())
         .limit(10)
         .all()
     )
     recent_scans_data = [
         {
-            "nick": ev.player.nick if ev.player else ev.player_id,
+            "nick": ev.player.nick if ev.player else (ev.player_id or "<deleted>"),
             "tag_id": ev.tag_id,
             "delta": ev.delta_points,
         }

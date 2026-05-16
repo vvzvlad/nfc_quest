@@ -82,10 +82,10 @@ function AdminSidebar({ active }) {
   }, []);
 
   const sections = [
-    { id: 'game',    label: 'Управление игрой', kbd: 'G' },
-    { id: 'tags',    label: 'Метки',            kbd: 'T', meta: stats.total_tags != null ? String(stats.total_tags) : undefined },
-    { id: 'players', label: 'Участники',        kbd: 'P', meta: stats.total_players != null ? String(stats.total_players) : undefined },
-    { id: 'log',     label: 'Лог событий',      kbd: 'L', meta: stats.total_scans != null ? String(stats.total_scans) : undefined },
+    { id: 'game',    label: 'Управление игрой' },
+    { id: 'tags',    label: 'Метки',            meta: stats.total_tags != null ? String(stats.total_tags) : undefined },
+    { id: 'players', label: 'Участники',        meta: stats.total_players != null ? String(stats.total_players) : undefined },
+    { id: 'log',     label: 'Лог событий',      meta: stats.total_scans != null ? String(stats.total_scans) : undefined },
   ];
 
   // Compute game status from timestamps (same logic as ScreenAdminGame)
@@ -155,7 +155,7 @@ function AdminSidebar({ active }) {
         <div key={s.id}
           onClick={() => navigate(`/admin/${s.id}`)}
           style={{
-          display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: 8,
+          display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8,
           padding: '7px 8px',
           background: active === s.id ? 'var(--bg-2)' : 'transparent',
           borderLeft: active === s.id ? '2px solid var(--accent)' : '2px solid transparent',
@@ -166,10 +166,6 @@ function AdminSidebar({ active }) {
         }}>
           <span>{s.label}</span>
           {s.meta && <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{s.meta}</span>}
-          <span className="mono" style={{
-            fontSize: 10, color: 'var(--muted)', border: '1px solid var(--line-2)',
-            padding: '1px 4px', minWidth: 14, textAlign: 'center',
-          }}>{s.kbd}</span>
         </div>
       ))}
 
@@ -190,7 +186,7 @@ function AdminSidebar({ active }) {
           )}
         </div>
         <div className="mono" style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
-          <span>admin@metascan</span>
+          <span>admin</span>
           <span onClick={() => adminApi.logout().then(() => { window.location.href = '/admin/login'; })} style={{ cursor: 'pointer' }}>выход</span>
         </div>
       </div>
@@ -456,7 +452,7 @@ function ScreenAdminGame() {
               <div><span style={{ color: 'var(--success)' }}>GET</span> /tag/&lt;id&gt;</div>
               <div><span style={{ color: 'var(--success)' }}>GET</span> /scoreboard</div>
               <div><span style={{ color: 'var(--info)'    }}>POST</span> /register</div>
-              <div><span style={{ color: 'var(--warn)'    }}>SSE</span>  /events</div>
+              <div><span style={{ color: 'var(--warn)'    }}>WS</span>  /socket.io</div>
             </div>
           </div>
         </div>
@@ -570,6 +566,7 @@ function ScreenAdminTags() {
   const handleDelete = async (id) => {
     if (!window.confirm(`Удалить метку ${id}?`)) return;
     await adminApi.deleteTag(id);
+    if (selectedTag?.id === id) setSelectedTag(null);
     loadTags();
   };
 
@@ -658,7 +655,7 @@ function ScreenAdminTags() {
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', color: 'var(--fg)' }} className="tabular">{params}</td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.scan_count ?? 0}</td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.unique_players_count ?? 0}</td>
-                    <td style={{ padding: '5px 12px' }}><StatusBadge s={t.status || 'active'} /></td>
+                    <td style={{ padding: '5px 12px' }}><StatusBadge s={t.is_blocked ? 'used' : 'active'} /></td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', textAlign: 'right' }}>
                       <span style={{ marginRight: 12, cursor: 'pointer' }} onClick={() => handleReset(t.id)}>сброс</span>
                       <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => handleDelete(t.id)}>удал.</span>
@@ -671,7 +668,7 @@ function ScreenAdminTags() {
 
           {/* pagination footer */}
           <div style={{ padding: '8px 24px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
-            <span>показано {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
+            <span>показано {total === 0 ? 0 : (page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
             <span>
               <span style={{ cursor: 'pointer', marginRight: 12 }} onClick={() => setPage(p => Math.max(1, p - 1))}>←</span>
               <span style={{ cursor: 'pointer' }} onClick={() => setPage(p => p + 1)}>→</span>
@@ -1201,7 +1198,7 @@ function ScreenAdminPlayers() {
 
           {/* pagination */}
           <div style={{ padding: '8px 16px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
-            <span>показано {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
+            <span>показано {total === 0 ? 0 : (page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
             <span>
               <span style={{ cursor: 'pointer', marginRight: 12 }} onClick={() => setPage(p => Math.max(1, p - 1))}>←</span>
               <span style={{ cursor: 'pointer' }} onClick={() => setPage(p => p + 1)}>→</span>
@@ -1301,7 +1298,7 @@ function ScreenAdminLog() {
 
           {/* pagination */}
           <div style={{ padding: '8px 16px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
-            <span>показано {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
+            <span>показано {total === 0 ? 0 : (page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
             <span>
               <span style={{ cursor: 'pointer', marginRight: 12 }} onClick={() => setPage(p => Math.max(1, p - 1))}>←</span>
               <span style={{ cursor: 'pointer' }} onClick={() => setPage(p => p + 1)}>→</span>

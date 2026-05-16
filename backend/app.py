@@ -3,7 +3,6 @@ from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
-
 from config import Config
 from models import db, GameSettings
 from blueprints.game_api import game_api

@@ -12,7 +12,7 @@ class Player(db.Model):
     points = db.Column(db.Integer, default=0, nullable=False)
     registered_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
-    scan_events = db.relationship("ScanEvent", back_populates="player", cascade="all, delete-orphan")
+    scan_events = db.relationship("ScanEvent", back_populates="player", cascade="save-update, merge")
     tag_scans = db.relationship("TagPlayerScan", back_populates="player", cascade="all, delete-orphan")
 
     def to_dict(self):
@@ -34,7 +34,7 @@ class Tag(db.Model):
     is_blocked = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
-    scan_events = db.relationship("ScanEvent", back_populates="tag", cascade="all, delete-orphan")
+    scan_events = db.relationship("ScanEvent", back_populates="tag", cascade="save-update, merge")
     player_scans = db.relationship("TagPlayerScan", back_populates="tag", cascade="all, delete-orphan")
 
     def to_dict(self):
@@ -52,8 +52,8 @@ class ScanEvent(db.Model):
     __tablename__ = "scan_events"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    tag_id = db.Column(db.String(16), db.ForeignKey("tags.id"), nullable=False)
-    player_id = db.Column(db.String(36), db.ForeignKey("players.id"), nullable=False)
+    tag_id = db.Column(db.String(16), db.ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
+    player_id = db.Column(db.String(36), db.ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
     delta_points = db.Column(db.Integer, nullable=False, default=0)
     result = db.Column(db.String(32), nullable=False)         # "ok" | "locked" | "not_yet" | "finished" | "unknown" | "rate_limit"
     scanned_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

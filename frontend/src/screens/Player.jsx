@@ -394,13 +394,13 @@ function BoardEmptyHint({ message }) {
 
 function CornerBrackets() {
   const c = 'var(--muted-2)';
-  const s = { position: 'absolute', width: 14, height: 14, borderColor: c, borderStyle: 'solid', borderWidth: 0 };
+  const s = { position: 'absolute', width: 14, height: 14, borderColor: c, borderStyle: 'solid', borderWidth: 0, pointerEvents: 'none' };
   return (
     <>
-      <div style={{ ...s, top: 16, left: 16,  borderTopWidth: 1, borderLeftWidth: 1 }} />
-      <div style={{ ...s, top: 16, right: 16, borderTopWidth: 1, borderRightWidth: 1 }} />
-      <div style={{ ...s, bottom: 16, left: 16,  borderBottomWidth: 1, borderLeftWidth: 1 }} />
-      <div style={{ ...s, bottom: 16, right: 16, borderBottomWidth: 1, borderRightWidth: 1 }} />
+      <div style={{ ...s, top: 8, left: 8,  borderTopWidth: 1, borderLeftWidth: 1 }} />
+      <div style={{ ...s, top: 8, right: 8, borderTopWidth: 1, borderRightWidth: 1 }} />
+      <div style={{ ...s, bottom: 8, left: 8,  borderBottomWidth: 1, borderLeftWidth: 1 }} />
+      <div style={{ ...s, bottom: 8, right: 8, borderBottomWidth: 1, borderRightWidth: 1 }} />
     </>
   );
 }

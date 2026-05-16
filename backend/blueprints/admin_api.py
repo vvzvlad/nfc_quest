@@ -159,12 +159,12 @@ def stop_game():
 @admin_api.route("/players", methods=["DELETE"])
 @_require_admin
 def delete_all_players():
-    """Delete all players, scan events, and tag-player scan records."""
+    """Delete all players and tag-player scan records. Scan events are preserved."""
     from socket_events import broadcast_scoreboard
 
     count = db.session.query(Player).count()
     db.session.query(TagPlayerScan).delete()
-    db.session.query(ScanEvent).delete()
+    db.session.query(ScanEvent).update({"player_id": None})  # nullify FK before bulk delete
     db.session.query(Player).delete()
     # Reset all tag block states so tags work for new players after a game restart
     db.session.query(Tag).update({"is_blocked": False})
@@ -231,7 +231,7 @@ def adjust_player(player_id):
 @admin_api.route("/players/<player_id>", methods=["DELETE"])
 @_require_admin
 def delete_player(player_id):
-    """Delete a single player and their scan events."""
+    """Delete a single player and their game-state records. Scan events are preserved."""
     from socket_events import broadcast_scoreboard
 
     player = db.session.get(Player, player_id)
@@ -239,7 +239,7 @@ def delete_player(player_id):
         return jsonify({"error": "PLAYER_NOT_FOUND"}), 404
 
     db.session.query(TagPlayerScan).filter_by(player_id=player_id).delete()
-    db.session.query(ScanEvent).filter_by(player_id=player_id).delete()
+    db.session.query(ScanEvent).filter_by(player_id=player_id).update({"player_id": None})  # nullify FK before delete
     db.session.delete(player)
     db.session.commit()
     broadcast_scoreboard()
@@ -254,10 +254,10 @@ def delete_player(player_id):
 @admin_api.route("/tags", methods=["DELETE"])
 @_require_admin
 def delete_all_tags():
-    """Delete all tags, related scan events, and tag-player scan records."""
+    """Delete all tags and tag-player scan records. Scan events are preserved."""
     count = db.session.query(Tag).count()
     db.session.query(TagPlayerScan).delete()
-    db.session.query(ScanEvent).delete()
+    db.session.query(ScanEvent).update({"tag_id": None})  # nullify FK before bulk delete
     db.session.query(Tag).delete()
     db.session.commit()
     return jsonify({"ok": True, "deleted": count}), 200
@@ -361,13 +361,13 @@ def update_tag(tag_id):
 @admin_api.route("/tags/<tag_id>", methods=["DELETE"])
 @_require_admin
 def delete_tag(tag_id):
-    """Delete a tag and all related records."""
+    """Delete a tag and its game-state records. Scan events are preserved."""
     tag = db.session.get(Tag, tag_id)
     if tag is None:
         return jsonify({"error": "TAG_NOT_FOUND"}), 404
 
     db.session.query(TagPlayerScan).filter_by(tag_id=tag_id).delete()
-    db.session.query(ScanEvent).filter_by(tag_id=tag_id).delete()
+    db.session.query(ScanEvent).filter_by(tag_id=tag_id).update({"tag_id": None})  # nullify FK before delete
     db.session.delete(tag)
     db.session.commit()
     return jsonify({"ok": True}), 200
@@ -414,19 +414,25 @@ def get_log():
 
     items = []
     for e in events:
-        player = db.session.get(Player, e.player_id)
-        tag = db.session.get(Tag, e.tag_id)
+        # Guard against None PKs to avoid SAWarning / future SQLAlchemy errors
+        player = db.session.get(Player, e.player_id) if e.player_id is not None else None
+        tag = db.session.get(Tag, e.tag_id) if e.tag_id is not None else None
 
-        # Compute player's total points after this scan by summing all events up to and including this one
-        total_after = db.session.query(func.sum(ScanEvent.delta_points)).filter(
-            ScanEvent.player_id == e.player_id,
-            ScanEvent.id <= e.id,
-        ).scalar() or 0
+        # Compute cumulative points for this player up to this event
+        # For orphaned events (player deleted), total_after is meaningless — return 0
+        if e.player_id is None:
+            total_after = 0
+        else:
+            total_after = db.session.query(func.sum(ScanEvent.delta_points)).filter(
+                ScanEvent.player_id == e.player_id,
+                ScanEvent.id <= e.id,
+            ).scalar() or 0
 
         items.append({
             "id": e.id,
             "tag_id": e.tag_id,
-            "player_nick": player.nick if player else e.player_id,
+            "player_id": e.player_id,
+            "player_nick": player.nick if player else (e.player_id or "<deleted>"),
             "delta_points": e.delta_points,
             "result": e.result,
             "scanned_at": e.scanned_at.strftime("%Y-%m-%dT%H:%M:%SZ") if e.scanned_at else None,

@@ -125,3 +125,56 @@ class TestBatchCreateLarge:
         assert len(items) == 100
         ids = [item["id"] for item in items]
         assert len(set(ids)) == 100
+
+
+class TestLogCombinedFilter:
+    def test_log_filter_by_player_and_tag(self, client, admin_client):
+        """
+        GET /admin/api/log?player_id=X&tag_id=Y applies AND logic:
+        only entries where BOTH player_id=X and tag_id=Y match are returned.
+        """
+        start_game(admin_client)
+
+        # Register two players
+        register_player(client, "player-cf-1", "CF1")
+        register_player(client, "player-cf-2", "CF2")
+
+        # Create two distinct tags
+        shared_tags = create_tag(admin_client, "unlimited", {"points": 10})
+        exclusive_tags = create_tag(admin_client, "unlimited", {"points": 20})
+        shared_tag_id = shared_tags[0]["id"]
+        exclusive_tag_id = exclusive_tags[0]["id"]
+
+        # player1 scans shared_tag
+        rate_limiter.clear()
+        r1 = scan_tag(client, "player-cf-1", shared_tag_id)
+        assert r1.get_json()["status"] == "ok"
+
+        # player2 scans shared_tag — same tag, different player
+        rate_limiter.clear()
+        r2 = scan_tag(client, "player-cf-2", shared_tag_id)
+        assert r2.get_json()["status"] == "ok"
+
+        # player1 scans exclusive_tag — same player, different tag
+        rate_limiter.clear()
+        r3 = scan_tag(client, "player-cf-1", exclusive_tag_id)
+        assert r3.get_json()["status"] == "ok"
+
+        # Query log with BOTH filters: player_id=player-cf-1 AND tag_id=shared_tag_id
+        r = admin_client.get(f"/admin/api/log?player_id=player-cf-1&tag_id={shared_tag_id}")
+        assert r.status_code == 200
+
+        data = r.get_json()
+        items = data["items"]
+
+        # Exactly one entry must match: player1 + shared_tag
+        assert len(items) == 1
+        assert items[0]["result"] == "ok"
+
+        # Log items expose player_nick (not player_id) and tag_id
+        # Confirm the combined filter excludes player2+shared and player1+exclusive
+        assert items[0]["player_nick"] == "CF1"
+        assert items[0]["tag_id"] == shared_tag_id
+
+        # total in response must also reflect the filtered count
+        assert data["total"] == 1

@@ -117,3 +117,24 @@ class TestScanGameStatus:
         assert r2.status_code == 429
         assert r2.get_json()["status"] == "rate_limit"
         assert r2.get_json()["message"] == "RATE_LIMIT_WAIT"
+
+    # 1.4: Scanning a tag that has been deleted returns status "unknown"
+    def test_scan_deleted_tag(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, "player-del-tag", "DelTagPlayer")
+        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tag_id = tags[0]["id"]
+
+        # Delete the tag via admin API
+        r_del = admin_client.delete(f"/admin/api/tags/{tag_id}")
+        assert r_del.status_code == 200
+
+        # Clear rate limiter so it doesn't interfere
+        rate_limiter.clear()
+
+        # Scanning a deleted tag should return "unknown" (tag no longer exists)
+        r = scan_tag(client, "player-del-tag", tag_id)
+        assert r.status_code == 200
+        assert r.get_json()["status"] == "unknown"
+
+

@@ -480,7 +480,7 @@ class TestAdminScanLog:
 
     def test_admin_scan_log_player_nick_present(self, client, admin_client):
         """Log entries carry the correct player_nick while the player exists;
-        deleting a player also removes their scan events from the log."""
+        deleting a player preserves their scan events with player_id=null and player_nick='<deleted>'."""
         start_game(admin_client)
         register_player(client, "player-g7c", "PlayerG7C")
         tags = create_tag(admin_client, "unlimited", {"points": 5})
@@ -497,13 +497,105 @@ class TestAdminScanLog:
         assert len(ok_items) >= 1
         assert ok_items[0]["player_nick"] == "PlayerG7C"
 
-        # Delete the player — backend also removes their scan events
+        # Delete the player — scan events are preserved with player_id=null
         r_del = admin_client.delete("/admin/api/players/player-g7c")
         assert r_del.status_code == 200
 
-        # After deletion the scan events are gone; log returns empty for this player_id
+        # Filtering by the old player_id returns empty (player_id is now null)
         r_log_after = admin_client.get("/admin/api/log?player_id=player-g7c")
         assert r_log_after.get_json()["items"] == []
+
+        # But the overall log still contains the orphaned event with player_id=null and nick="<deleted>"
+        r_log_all = admin_client.get("/admin/api/log")
+        all_items = r_log_all.get_json()["items"]
+        orphaned = [i for i in all_items if i["player_id"] is None]
+        assert len(orphaned) >= 1
+        assert orphaned[0]["player_nick"] == "<deleted>"
+
+    def test_delete_tag_preserves_scan_log(self, client, admin_client):
+        """Deleting a tag preserves scan events with tag_id=null."""
+        start_game(admin_client)
+        register_player(client, "player-del-tag", "PlayerDelTag")
+        tags = create_tag(admin_client, "unlimited", {"points": 7})
+        tag_id = tags[0]["id"]
+
+        rate_limiter.clear()
+        scan_tag(client, "player-del-tag", tag_id)
+
+        # Verify scan event exists before deletion
+        r_before = admin_client.get(f"/admin/api/log?tag_id={tag_id}")
+        assert len(r_before.get_json()["items"]) >= 1
+
+        # Delete the tag — scan events must be preserved
+        r_del = admin_client.delete(f"/admin/api/tags/{tag_id}")
+        assert r_del.status_code == 200
+
+        # Filtering by old tag_id returns empty (tag_id is now null)
+        r_log_after = admin_client.get(f"/admin/api/log?tag_id={tag_id}")
+        assert r_log_after.get_json()["items"] == []
+
+        # Overall log still contains the orphaned event with tag_id=null
+        r_log_all = admin_client.get("/admin/api/log")
+        all_items = r_log_all.get_json()["items"]
+        orphaned = [i for i in all_items if i["tag_id"] is None]
+        assert len(orphaned) >= 1
+
+    def test_delete_all_players_preserves_scan_log(self, client, admin_client):
+        """Bulk-deleting all players preserves scan events with player_id=null."""
+        start_game(admin_client)
+        register_player(client, "player-bulk-del-1", "BulkDel1")
+        tags = create_tag(admin_client, "unlimited", {"points": 8})
+        tag_id = tags[0]["id"]
+
+        rate_limiter.clear()
+        scan_tag(client, "player-bulk-del-1", tag_id)
+
+        # Verify scan event exists before deletion
+        r_before = admin_client.get("/admin/api/log?player_id=player-bulk-del-1")
+        assert len(r_before.get_json()["items"]) >= 1
+
+        # Bulk-delete all players — scan events must be preserved
+        r_del = admin_client.delete("/admin/api/players")
+        assert r_del.status_code == 200
+
+        # Filtering by old player_id returns empty (player_id is now null)
+        r_log_after = admin_client.get("/admin/api/log?player_id=player-bulk-del-1")
+        assert r_log_after.get_json()["items"] == []
+
+        # Overall log still contains the orphaned event with player_id=null
+        r_log_all = admin_client.get("/admin/api/log")
+        all_items = r_log_all.get_json()["items"]
+        orphaned = [i for i in all_items if i["player_id"] is None]
+        assert len(orphaned) >= 1
+        assert orphaned[0]["player_nick"] == "<deleted>"
+
+    def test_delete_all_tags_preserves_scan_log(self, client, admin_client):
+        """Bulk-deleting all tags preserves scan events with tag_id=null."""
+        start_game(admin_client)
+        register_player(client, "player-bulk-tag-del", "BulkTagDel")
+        tags = create_tag(admin_client, "unlimited", {"points": 9})
+        tag_id = tags[0]["id"]
+
+        rate_limiter.clear()
+        scan_tag(client, "player-bulk-tag-del", tag_id)
+
+        # Verify scan event exists before deletion
+        r_before = admin_client.get(f"/admin/api/log?tag_id={tag_id}")
+        assert len(r_before.get_json()["items"]) >= 1
+
+        # Bulk-delete all tags — scan events must be preserved
+        r_del = admin_client.delete("/admin/api/tags")
+        assert r_del.status_code == 200
+
+        # Filtering by old tag_id returns empty (tag_id is now null)
+        r_log_after = admin_client.get(f"/admin/api/log?tag_id={tag_id}")
+        assert r_log_after.get_json()["items"] == []
+
+        # Overall log still contains the orphaned event with tag_id=null
+        r_log_all = admin_client.get("/admin/api/log")
+        all_items = r_log_all.get_json()["items"]
+        orphaned = [i for i in all_items if i["tag_id"] is None]
+        assert len(orphaned) >= 1
 
 
 class TestAdminGameValidation:

@@ -114,3 +114,20 @@ class TestRegister:
         assert r2.status_code == 200
         body = r2.get_json()
         assert body["points"] == 50
+
+    # 1.3: After a player is deleted, their nick is freed and can be reused by a new player
+    def test_register_nick_freed_after_player_delete(self, client, admin_client):
+        # Register first player with nick "Alice"
+        r1 = register_player(client, "uuid-alice-1", "Alice")
+        assert r1.status_code == 201
+
+        # Delete the first player — this should free the nick
+        r_del = admin_client.delete("/admin/api/players/uuid-alice-1")
+        assert r_del.status_code == 200
+
+        # A new player should now be able to register with the same nick
+        r2 = register_player(client, "uuid-alice-2", "Alice")
+        assert r2.status_code == 201
+        body = r2.get_json()
+        assert body["nick"] == "Alice"
+

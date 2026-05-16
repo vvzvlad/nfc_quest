@@ -123,8 +123,10 @@ function ScreenHallScoreboard() {
               {timeLeft
                 ? /^\d{2}:\d{2}:\d{2}$/.test(timeLeft)
                   ? <>
-                      {timeLeft.slice(0, 5)}
-                      <span style={{ color: 'var(--muted-2)' }}>:</span>
+                      {timeLeft.slice(0, 2)}
+                      <span style={{ color: 'var(--muted-2)', padding: '0 0.04em' }}>:</span>
+                      {timeLeft.slice(3, 5)}
+                      <span style={{ color: 'var(--muted-2)', padding: '0 0.04em' }}>:</span>
                       <span style={{ color: 'var(--accent)' }}>{timeLeft.slice(6)}</span>
                     </>
                   : <span style={{ color: 'var(--accent)', fontSize: 100, whiteSpace: 'normal', lineHeight: 0.95 }}>{timeLeft}</span>
@@ -213,7 +215,7 @@ function ScreenHallScoreboard() {
               </React.Fragment>
             ))
         }
-        <span style={{ color: 'var(--muted)' }}>scoreboard.metascan.ru</span>
+        <span style={{ color: 'var(--muted)' }}>{window.location.host}</span>
       </div>
     </div>
   );
