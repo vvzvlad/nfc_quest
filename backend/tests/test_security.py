@@ -135,6 +135,39 @@ class TestAdminBruteForce:
         r = client.post("/admin/api/login", json={"password": "wrong-final"})
         assert r.status_code == 429
 
+    def test_login_rate_limit_uses_x_forwarded_for(self, app):
+        """Rate limit buckets are per real client IP via X-Forwarded-For, not proxy IP."""
+        from blueprints.admin_api import _login_attempts
+        _login_attempts.clear()
+
+        client_a = app.test_client()
+        client_b = app.test_client()
+
+        # Client A (IP 1.1.1.1) exhausts rate limit
+        for i in range(5):
+            r = client_a.post(
+                "/admin/api/login",
+                json={"password": f"wrong-{i}"},
+                headers={"X-Forwarded-For": "1.1.1.1"},
+            )
+            assert r.status_code == 401
+
+        # Client A is now blocked
+        r = client_a.post(
+            "/admin/api/login",
+            json={"password": "wrong-6"},
+            headers={"X-Forwarded-For": "1.1.1.1"},
+        )
+        assert r.status_code == 429
+
+        # Client B (IP 2.2.2.2) is NOT blocked — independent bucket
+        r = client_b.post(
+            "/admin/api/login",
+            json={"password": "testpass"},
+            headers={"X-Forwarded-For": "2.2.2.2"},
+        )
+        assert r.status_code == 200
+
 
 class TestTagIdEnumeration:
     def test_unknown_tag_returns_same_response_shape(self, client, admin_client):
