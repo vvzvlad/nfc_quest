@@ -29,10 +29,10 @@ def create_app(config_class=Config) -> Flask:
     # CORS: allow the Vite dev server during development
     CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:5173"], supports_credentials=True)
 
-    # SocketIO with eventlet async mode
+    # SocketIO with configurable async mode (use "threading" for tests)
     socketio = SocketIO(
         app,
-        async_mode="eventlet",
+        async_mode=app.config.get("SOCKETIO_ASYNC_MODE", "eventlet"),
         cors_allowed_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     )
 

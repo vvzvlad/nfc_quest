@@ -168,7 +168,12 @@ def adjust_player(player_id):
     if player is None:
         return jsonify({"error": "Player not found"}), 404
 
-    player.points += int(delta)
+    try:
+        delta_int = int(delta)
+    except (TypeError, ValueError):
+        return jsonify({"error": "delta must be a number"}), 400
+
+    player.points += delta_int
     db.session.commit()
     return jsonify({"player_id": player.id, "nick": player.nick, "points": player.points}), 200
 
