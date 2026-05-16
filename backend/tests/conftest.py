@@ -49,3 +49,13 @@ def admin_client(app):
     c = app.test_client()
     c.post("/admin/api/login", json={"password": "testpass"})
     return c
+
+
+@pytest.fixture()
+def ws_client(app):
+    """WebSocket test client connected to the app's SocketIO instance."""
+    import socket_events
+    ws = socket_events.socketio.test_client(app)
+    yield ws
+    # Disconnect after each test to avoid polluting the global SocketIO state
+    ws.disconnect()
