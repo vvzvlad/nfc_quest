@@ -36,7 +36,7 @@ def test_ws_broadcast_after_scan(app, client, admin_client, ws_client):
     # Setup: start game, register player, create tag
     start_game(admin_client)
     register_player(client, make_player_id("player-h2"), "PlayerH2")
-    tags = create_tag(admin_client, "unlimited", {"points": 30})
+    tags = create_tag(admin_client, "random", {"min": 30, "max": 30})
     tag_id = tags[0]["id"]
 
     # Clear initial connect events from the WS client buffer
@@ -69,7 +69,7 @@ def test_ws_broadcast_to_multiple_clients(app, client, admin_client):
     # Setup
     start_game(admin_client)
     register_player(client, make_player_id("player-h3"), "PlayerH3")
-    tags = create_tag(admin_client, "unlimited", {"points": 10})
+    tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
     tag_id = tags[0]["id"]
 
     # Connect two separate WS clients
@@ -147,7 +147,7 @@ def test_ws_no_broadcast_on_not_yet_scan(app, client, admin_client, ws_client):
     ws_client.get_received()
 
     register_player(client, make_player_id("player-wm1"), "PlayerWM1")
-    tags = create_tag(admin_client, "unlimited", {"points": 10})
+    tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
     tag_id = tags[0]["id"]
 
     # Scan — should return "not_yet"
@@ -178,7 +178,7 @@ def test_ws_no_broadcast_on_finished_scan(app, client, admin_client, ws_client):
     ws_client.get_received()
 
     register_player(client, make_player_id("player-wm1b"), "PlayerWM1B")
-    tags = create_tag(admin_client, "unlimited", {"points": 10})
+    tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
     tag_id = tags[0]["id"]
 
     # Scan — should return "finished"

@@ -12,7 +12,7 @@ class TestStrategies:
     # C1: unlimited strategy — player can scan same tag many times, points accumulate
     def test_scan_unlimited_multiple_times(self, client, admin_client):
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-c1"), "PlayerC1")
 
@@ -92,7 +92,7 @@ class TestStrategies:
     # C5: Negative points — player total can go below zero
     def test_scan_negative_points(self, client, admin_client):
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": -15})
+        tags = create_tag(admin_client, "random", {"min": -15, "max": -15})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-c5"), "PlayerC5")
 
@@ -107,11 +107,11 @@ class TestStrategies:
         body2 = r2.get_json()
         assert body2["total"] == -30
 
-    # S-M4: Tag with empty strategy_params defaults to 0 points for unlimited strategy
+    # S-M4: Tag with empty strategy_params defaults to 0 points for random strategy
     def test_scan_empty_strategy_params(self, client, admin_client):
         start_game(admin_client)
-        # Create unlimited tag with no "points" key in params — strategy should default to 0
-        tags = create_tag(admin_client, "unlimited", {})
+        # Create random tag with no min/max keys in params — strategy should default to 0
+        tags = create_tag(admin_client, "random", {})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-sm4"), "PlayerSM4")
 
@@ -290,7 +290,7 @@ class TestRateLimit:
     # D1: Two immediate scans by the same player → second returns 429
     def test_rate_limit_blocks_fast_rescan(self, client, admin_client):
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-d1"), "PlayerD1")
 
@@ -305,7 +305,7 @@ class TestRateLimit:
     # D2: After manually backdating the rate limiter entry, next scan succeeds
     def test_rate_limit_allows_after_cooldown(self, client, admin_client):
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-d2"), "PlayerD2")
 
@@ -325,8 +325,8 @@ class TestRateLimit:
     def test_rate_limit_applies_across_different_tags(self, client, admin_client):
         start_game(admin_client)
         register_player(client, make_player_id("player-dm1"), "PlayerDM1")
-        tags1 = create_tag(admin_client, "unlimited", {"points": 10})
-        tags2 = create_tag(admin_client, "unlimited", {"points": 10})
+        tags1 = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        tags2 = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag1_id = tags1[0]["id"]
         tag2_id = tags2[0]["id"]
 
@@ -345,7 +345,7 @@ class TestRateLimit:
         start_game(admin_client)
         register_player(client, make_player_id("player-dm2a"), "PlayerDM2A")
         register_player(client, make_player_id("player-dm2b"), "PlayerDM2B")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # Player A scans first
@@ -366,7 +366,7 @@ class TestRateLimit:
     def test_rate_limit_429_body(self, client, admin_client):
         start_game(admin_client)
         register_player(client, make_player_id("player-dm3"), "PlayerDM3")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # First scan succeeds

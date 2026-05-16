@@ -10,7 +10,7 @@ class TestRegisterThenScan:
     def test_register_does_not_set_rate_limiter(self, client, admin_client):
         """Registration must NOT populate rate_limiter — first scan passes immediately."""
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 25})
+        tags = create_tag(admin_client, "random", {"min": 25, "max": 25})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
@@ -66,7 +66,7 @@ class TestScanResponseFields:
     def test_ok_scan_includes_strategy_fields(self, client, admin_client):
         """Successful scan response includes strategy and strategy_display."""
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-path9"), "Path9Player")
 
@@ -75,14 +75,14 @@ class TestScanResponseFields:
         body = r.get_json()
         assert body["status"] == "ok"
         assert "strategy" in body
-        assert body["strategy"] == "unlimited"
+        assert body["strategy"] == "random"
         assert "strategy_display" in body
         assert isinstance(body["strategy_display"], str)
 
     def test_ok_scan_includes_meta_field(self, client, admin_client):
         """Successful scan response includes meta with rank info."""
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-path9b"), "Path9B")
 

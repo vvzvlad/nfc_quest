@@ -35,7 +35,7 @@ class TestGameRestart:
         """After start → stop → start, scanning should succeed again."""
         start_game(admin_client)
         register_player(client, make_player_id("player-restart"), "RestartPlayer")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
@@ -65,7 +65,7 @@ class TestGameEdgeCases:
         )
 
         register_player(client, make_player_id("player-edge1"), "EdgePlayer1")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
@@ -99,7 +99,7 @@ class TestGameBoundary:
             },
         )
         register_player(client, make_player_id("player-boundary"), "BoundaryPlayer")
-        tags = create_tag(admin_client, "unlimited", {"points": 20})
+        tags = create_tag(admin_client, "random", {"min": 20, "max": 20})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
@@ -118,7 +118,7 @@ class TestGameBoundary:
             json={"starts_at": starts_at, "ends_at": ends_at},
         )
         register_player(client, make_player_id("player-boundary2"), "BoundaryPlayer2")
-        tags = create_tag(admin_client, "unlimited", {"points": 20})
+        tags = create_tag(admin_client, "random", {"min": 20, "max": 20})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()

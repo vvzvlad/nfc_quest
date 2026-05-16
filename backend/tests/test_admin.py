@@ -168,7 +168,7 @@ class TestAdminTags:
     def test_delete_all_tags_preserves_player_points(self, client, admin_client):
         start_game(admin_client)
         register_player(client, make_player_id("player-gm4"), "PlayerGM4")
-        tags = create_tag(admin_client, "unlimited", {"points": 25})
+        tags = create_tag(admin_client, "random", {"min": 25, "max": 25})
         tag_id = tags[0]["id"]
 
         # Player scans and earns 25 points
@@ -193,7 +193,7 @@ class TestAdminTags:
     # G-M10: Edit tag strategy_params changes the points awarded on next scan
     def test_update_tag_strategy_params(self, client, admin_client):
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-gm10"), "PlayerGM10")
 
@@ -205,24 +205,24 @@ class TestAdminTags:
         # Admin updates tag to 99 points
         r_put = admin_client.put(
             f"/admin/api/tags/{tag_id}",
-            json={"strategy_params": {"points": 99}},
+            json={"strategy_params": {"min": 99, "max": 99}},
         )
         assert r_put.status_code == 200
-        assert r_put.get_json()["strategy_params"]["points"] == 99
+        assert r_put.get_json()["strategy_params"]["min"] == 99
 
         # Scan again → 99 points
         rate_limiter.clear()
         r2 = scan_tag(client, make_player_id("player-gm10"), tag_id)
         assert r2.get_json()["delta"] == 99
 
-    # G-M11: Edit tag strategy (change from unlimited to one_time_per_player)
+    # G-M11: Edit tag strategy (change from random to one_time_per_player)
     def test_update_tag_strategy(self, client, admin_client):
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 20})
+        tags = create_tag(admin_client, "random", {"min": 20, "max": 20})
         tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-gm11"), "PlayerGM11")
 
-        # Scan unlimited tag twice — both succeed
+        # Scan random tag twice — both succeed
         rate_limiter.clear()
         r1 = scan_tag(client, make_player_id("player-gm11"), tag_id)
         assert r1.get_json()["status"] == "ok"
@@ -238,9 +238,8 @@ class TestAdminTags:
         assert r_put.status_code == 200
         assert r_put.get_json()["strategy"] == "one_time_per_player"
 
-        # Now third scan is locked (one_time_per_player, already scanned via TagPlayerScan...
-        # Actually TagPlayerScan doesn't have a record yet since previous scans were unlimited.
-        # So first scan after strategy change should succeed, second should lock.)
+        # TagPlayerScan doesn't have a record yet since previous scans were random.
+        # So first scan after strategy change should succeed, second should lock.
         rate_limiter.clear()
         r3 = scan_tag(client, make_player_id("player-gm11"), tag_id)
         assert r3.get_json()["status"] == "ok"
@@ -295,7 +294,7 @@ class TestAdminTags:
     def test_batch_create_tags_count_zero(self, admin_client):
         r = admin_client.post(
             "/admin/api/tags/batch",
-            json={"strategy": "unlimited", "strategy_params": {"points": 10}, "count": 0},
+            json={"strategy": "random", "strategy_params": {"min": 10, "max": 10}, "count": 0},
         )
         assert r.status_code == 201
         body = r.get_json()
@@ -403,7 +402,7 @@ class TestAdminScanLog:
     def test_admin_scan_log(self, client, admin_client):
         start_game(admin_client)
         register_player(client, make_player_id("player-g7"), "PlayerG7")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # Perform 3 scans
@@ -455,8 +454,8 @@ class TestAdminScanLog:
         register_player(client, make_player_id("player-g7b"), "PlayerG7B")
 
         # Create two tags: one positive, one negative
-        tags_pos = create_tag(admin_client, "unlimited", {"points": 20})
-        tags_neg = create_tag(admin_client, "unlimited", {"points": -5})
+        tags_pos = create_tag(admin_client, "random", {"min": 20, "max": 20})
+        tags_neg = create_tag(admin_client, "random", {"min": -5, "max": -5})
         tag_pos_id = tags_pos[0]["id"]
         tag_neg_id = tags_neg[0]["id"]
 
@@ -483,7 +482,7 @@ class TestAdminScanLog:
         deleting a player preserves their scan events with player_id=null and player_nick='<deleted>'."""
         start_game(admin_client)
         register_player(client, make_player_id("player-g7c"), "PlayerG7C")
-        tags = create_tag(admin_client, "unlimited", {"points": 5})
+        tags = create_tag(admin_client, "random", {"min": 5, "max": 5})
         tag_id = tags[0]["id"]
 
         # Player scans the tag
@@ -516,7 +515,7 @@ class TestAdminScanLog:
         """Deleting a tag preserves scan events with tag_id=null."""
         start_game(admin_client)
         register_player(client, make_player_id("player-del-tag"), "PlayerDelTag")
-        tags = create_tag(admin_client, "unlimited", {"points": 7})
+        tags = create_tag(admin_client, "random", {"min": 7, "max": 7})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
@@ -544,7 +543,7 @@ class TestAdminScanLog:
         """Bulk-deleting all players preserves scan events with player_id=null."""
         start_game(admin_client)
         register_player(client, make_player_id("player-bulk-del-1"), "BulkDel1")
-        tags = create_tag(admin_client, "unlimited", {"points": 8})
+        tags = create_tag(admin_client, "random", {"min": 8, "max": 8})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
@@ -573,7 +572,7 @@ class TestAdminScanLog:
         """Bulk-deleting all tags preserves scan events with tag_id=null."""
         start_game(admin_client)
         register_player(client, make_player_id("player-bulk-tag-del"), "BulkTagDel")
-        tags = create_tag(admin_client, "unlimited", {"points": 9})
+        tags = create_tag(admin_client, "random", {"min": 9, "max": 9})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
@@ -668,7 +667,7 @@ class TestAdminScanLogExtra:
             json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
         )
         register_player(client, make_player_id("player-lm1"), "PlayerLM1")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         rate_limiter.clear()
@@ -714,8 +713,8 @@ class TestAdminScanLogExtra:
         register_player(client, make_player_id("player-lm2a"), "PlayerLM2A")
         register_player(client, make_player_id("player-lm2b"), "PlayerLM2B")
 
-        tags1 = create_tag(admin_client, "unlimited", {"points": 10})
-        tags2 = create_tag(admin_client, "unlimited", {"points": 20})
+        tags1 = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        tags2 = create_tag(admin_client, "random", {"min": 20, "max": 20})
         tag1_id = tags1[0]["id"]
         tag2_id = tags2[0]["id"]
 
@@ -738,7 +737,7 @@ class TestAdminScanLogExtra:
     def test_log_pagination(self, client, admin_client):
         start_game(admin_client)
         register_player(client, make_player_id("player-lm3"), "PlayerLM3")
-        tags = create_tag(admin_client, "unlimited", {"points": 5})
+        tags = create_tag(admin_client, "random", {"min": 5, "max": 5})
         tag_id = tags[0]["id"]
 
         # Perform 5 scans

@@ -89,7 +89,7 @@ class TestBulkDeletePlayers:
         """A deleted player gets 404 when scanning."""
         start_game(admin_client)
         register_player(client, make_player_id("player-deleted"), "DeletedPlayer")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         admin_client.delete("/admin/api/players")

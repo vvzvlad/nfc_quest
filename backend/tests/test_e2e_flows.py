@@ -17,7 +17,7 @@ class TestE2EFlows:
         player_id = r_reg.get_json()["player_id"]
 
         # 3. Create an unlimited tag worth 25 points
-        tags = create_tag(admin_client, "unlimited", {"points": 25})
+        tags = create_tag(admin_client, "random", {"min": 25, "max": 25})
         tag_id = tags[0]["id"]
 
         # 4. Scan the tag
@@ -78,7 +78,7 @@ class TestE2EFlows:
     def test_game_lifecycle(self, client, admin_client):
         # Register a player and create a tag upfront
         register_player(client, make_player_id("player-f3"), "LifecyclePlayer")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # Step 1: Game not started yet — scan returns "not_yet"
@@ -117,7 +117,7 @@ class TestE2EFlows:
     # F4: Register a player and immediately scan (mimics real user flow)
     def test_register_then_immediately_scan(self, client, admin_client):
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # Register and scan back-to-back
@@ -136,7 +136,7 @@ class TestE2EFlows:
             json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
         )
         register_player(client, make_player_id("player-f5"), "PlayerF5")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # First scan returns "not_yet" and updates rate_limiter
@@ -181,7 +181,7 @@ class TestE2EFlows:
         )
 
         register_player(client, make_player_id("player-f7"), "PlayerF7")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # Scan in finished game state

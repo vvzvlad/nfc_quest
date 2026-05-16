@@ -118,7 +118,7 @@ class TestBatchCreateLarge:
         """Creating 100 tags should succeed and return 100 unique IDs."""
         r = admin_client.post(
             "/admin/api/tags/batch",
-            json={"strategy": "unlimited", "strategy_params": {"points": 5}, "count": 100},
+            json={"strategy": "random", "strategy_params": {"min": 5, "max": 5}, "count": 100},
         )
         assert r.status_code == 201
         items = r.get_json()["items"]
@@ -140,8 +140,8 @@ class TestLogCombinedFilter:
         register_player(client, make_player_id("player-cf-2"), "CF2")
 
         # Create two distinct tags
-        shared_tags = create_tag(admin_client, "unlimited", {"points": 10})
-        exclusive_tags = create_tag(admin_client, "unlimited", {"points": 20})
+        shared_tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        exclusive_tags = create_tag(admin_client, "random", {"min": 20, "max": 20})
         shared_tag_id = shared_tags[0]["id"]
         exclusive_tag_id = exclusive_tags[0]["id"]
 

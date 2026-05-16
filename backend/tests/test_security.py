@@ -186,7 +186,7 @@ class TestTagIdEnumeration:
     def test_existing_vs_nonexisting_tag_status_code_same(self, client, admin_client):
         """Both existing and non-existing tags return HTTP 200."""
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         real_tag_id = tags[0]["id"]
         register_player(client, make_player_id("player-enum2"), "EnumPlayer2")
 
@@ -204,7 +204,7 @@ class TestBatchCreateLimit:
         """Negative count should create 0 tags or be rejected."""
         r = admin_client.post(
             "/admin/api/tags/batch",
-            json={"strategy": "unlimited", "strategy_params": {"points": 1}, "count": -1},
+            json={"strategy": "random", "strategy_params": {"min": 1, "max": 1}, "count": -1},
         )
         if r.status_code == 201:
             assert r.get_json()["items"] == []

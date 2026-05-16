@@ -7,6 +7,9 @@ import pytest
 # Add backend/ to sys.path so imports work without the "backend." prefix
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Set ADMIN_PASSWORD before importing Config (it validates on import)
+os.environ.setdefault("ADMIN_PASSWORD", "testpass")
+
 from config import Config
 from app import create_app
 from blueprints.game_api import rate_limiter

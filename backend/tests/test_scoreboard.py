@@ -151,9 +151,9 @@ class TestScoreboard:
         start_game(admin_client)
 
         # Create tags with different point values
-        tags_10 = create_tag(admin_client, "unlimited", {"points": 10})
-        tags_20 = create_tag(admin_client, "unlimited", {"points": 20})
-        tags_5 = create_tag(admin_client, "unlimited", {"points": 5})
+        tags_10 = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        tags_20 = create_tag(admin_client, "random", {"min": 20, "max": 20})
+        tags_5 = create_tag(admin_client, "random", {"min": 5, "max": 5})
 
         # Register four players
         register_player(client, make_player_id("rank-a"), "Alpha")
@@ -207,7 +207,7 @@ class TestScoreboard:
     def test_scoreboard_rank_updates_on_leapfrog(self, client, admin_client):
         start_game(admin_client)
 
-        tags_50 = create_tag(admin_client, "unlimited", {"points": 50})
+        tags_50 = create_tag(admin_client, "random", {"min": 50, "max": 50})
 
         register_player(client, make_player_id("leap-a"), "Leader")
         register_player(client, make_player_id("leap-b"), "Chaser")
@@ -243,7 +243,7 @@ class TestScoreboard:
         import time
         start_game(admin_client)
 
-        tags_30 = create_tag(admin_client, "unlimited", {"points": 30})
+        tags_30 = create_tag(admin_client, "random", {"min": 30, "max": 30})
 
         # Register in controlled order to make tie-breaking deterministic
         register_player(client, make_player_id("tie-first"), "First")
@@ -280,7 +280,7 @@ class TestScoreboard:
     def test_scoreboard_scans_per_minute_nonzero(self, client, admin_client):
         start_game(admin_client)
         register_player(client, make_player_id("player-em5"), "PlayerEM5")
-        tags = create_tag(admin_client, "unlimited", {"points": 5})
+        tags = create_tag(admin_client, "random", {"min": 5, "max": 5})
         tag_id = tags[0]["id"]
 
         # Perform 3 scans

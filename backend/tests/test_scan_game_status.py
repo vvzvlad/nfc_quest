@@ -14,7 +14,7 @@ class TestScanGameStatus:
             "/admin/api/game",
             json={"starts_at": "2099-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
         )
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         register_player(client, make_player_id("player-b1"), "PlayerB1")
 
         r = scan_tag(client, make_player_id("player-b1"), tags[0]["id"])
@@ -32,7 +32,7 @@ class TestScanGameStatus:
             "/admin/api/game",
             json={"starts_at": "2000-01-01T00:00:00Z", "ends_at": "2099-12-31T00:00:00Z"},
         )
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         # Register the player while the game is active (registration is blocked when finished)
         register_player(client, make_player_id("player-b2"), "PlayerB2")
 
@@ -54,9 +54,9 @@ class TestScanGameStatus:
     # B3: Scan with unknown player while game is active → 404
     def test_scan_unknown_player(self, client, admin_client):
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
 
-        r = scan_tag(client, "nonexistent-player", tags[0]["id"])
+        r = scan_tag(client, make_player_id("unregistered-player"), tags[0]["id"])
         assert r.status_code == 404
         body = r.get_json()
         assert "error" in body
@@ -110,7 +110,7 @@ class TestScanGameStatus:
         # Start game, register player, create tag
         start_game(admin_client)
         register_player(client, make_player_id("player-b5"), "PlayerB5")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # First scan succeeds while game is active
@@ -132,7 +132,7 @@ class TestScanGameStatus:
     def test_scan_deleted_tag(self, client, admin_client):
         start_game(admin_client)
         register_player(client, make_player_id("player-del-tag"), "DelTagPlayer")
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         # Delete the tag via admin API

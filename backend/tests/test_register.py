@@ -64,6 +64,18 @@ class TestRegister:
         assert r.status_code == 400
         assert r.get_json()["error"] == "INVALID_PLAYER_ID"
 
+    # R-M5: Nick containing control characters (Unicode Cc category) is rejected
+    @pytest.mark.parametrize("bad_nick", [
+        "alice\nbob",      # newline
+        "eve\rmalory",     # carriage return
+        "null\x00byte",    # null byte
+        "tab\there",       # tab (U+0009, category Cc)
+    ])
+    def test_register_nick_with_control_chars(self, client, bad_nick):
+        r = register_player(client, make_player_id("uuid-ctrl"), bad_nick)
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "INVALID_NICK"
+
     # R-M3: Registration should work in not_started/active states,
     # but the sub-case for "finished" state expects 403 (WILL FAIL — current code returns 201)
     @pytest.mark.parametrize("game_state,expected_status", [

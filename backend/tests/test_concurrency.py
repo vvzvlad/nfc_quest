@@ -63,7 +63,7 @@ class TestConcurrentUnlimited:
     def test_concurrent_unlimited_scans_all_award_points(self, app, admin_client, client):
         """20 players scanning the same unlimited tag concurrently: all get points, no lost updates."""
         start_game(admin_client)
-        tags = create_tag(admin_client, "unlimited", {"points": 10})
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
         tag_id = tags[0]["id"]
 
         num_players = 20
