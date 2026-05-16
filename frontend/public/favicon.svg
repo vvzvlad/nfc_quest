@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Rounded square background with red border -->
+  <rect x="1" y="1" width="30" height="30" rx="6" ry="6" fill="#0c0d0e" stroke="#e63935" stroke-width="1.5"/>
+  <!-- NFC signal arcs emanating from bottom-left corner -->
+  <!-- Small arc (innermost) -->
+  <path d="M 8 24 A 4 4 0 0 1 12 20" stroke="#e63935" fill="none" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- Medium arc -->
+  <path d="M 8 24 A 9 9 0 0 1 17 15" stroke="#e63935" fill="none" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- Large arc (outermost) -->
+  <path d="M 8 24 A 14 14 0 0 1 22 10" stroke="#e63935" fill="none" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- Center dot at origin point of arcs -->
+  <circle cx="8" cy="24" r="1.8" fill="#e63935"/>
+</svg>
