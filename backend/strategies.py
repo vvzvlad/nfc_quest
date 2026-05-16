@@ -83,6 +83,19 @@ class RandomStrategy(ScoringStrategy):
         return points, "ok"
 
 
+class PenaltyStrategy(ScoringStrategy):
+    """
+    Always subtracts a fixed number of points.
+    strategy_params: {"points": N}  (N is stored positive, applied as negative)
+    """
+
+    name = "penalty"
+
+    def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
+        points = int((tag.strategy_params or {}).get("points", 0))
+        return -points, "ok"
+
+
 # Registry: strategy name -> strategy instance
 # To add a new strategy: create a subclass and add it here.
 STRATEGIES: dict[str, ScoringStrategy] = {
@@ -91,6 +104,7 @@ STRATEGIES: dict[str, ScoringStrategy] = {
         OneTimeGlobalStrategy(),
         OneTimePerPlayerStrategy(),
         RandomStrategy(),
+        PenaltyStrategy(),
     ]
 }
 

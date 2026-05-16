@@ -286,6 +286,7 @@ function HallRow({ place, name, score, mine }) {
       <div style={{
         fontFamily: 'var(--font-mono)', fontSize: 18, color: mine ? 'var(--fg)' : 'var(--fg-2)',
         fontWeight: mine ? 600 : 400,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
       }}>{name}{mine && <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 12 }}>· ВЫ</span>}</div>
       <div className="tabular" style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: 'var(--fg)' }}>{score}</div>
     </div>

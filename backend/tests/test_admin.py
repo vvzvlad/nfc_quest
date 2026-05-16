@@ -300,21 +300,33 @@ class TestAdminTags:
         body = r.get_json()
         assert body["items"] == []
 
-    # G-M9: Tag with unknown strategy — scanning returns status "unknown"
-    def test_batch_create_unknown_strategy_scan_returns_unknown(self, client, admin_client):
+    # G-M9: Batch creation rejects unknown strategy name
+    def test_batch_create_unknown_strategy_rejected(self, admin_client):
         r_batch = admin_client.post(
             "/admin/api/tags/batch",
             json={"strategy": "unknown_xyz", "strategy_params": {}, "count": 1},
         )
-        assert r_batch.status_code == 201
-        tag_id = r_batch.get_json()["items"][0]["id"]
+        assert r_batch.status_code == 400
+        assert r_batch.get_json()["error"] == "UNKNOWN_STRATEGY"
 
-        start_game(admin_client)
-        register_player(client, make_player_id("player-gm9"), "PlayerGM9")
 
-        r = scan_tag(client, make_player_id("player-gm9"), tag_id)
+    def test_create_tags_unknown_strategy_rejected(self, admin_client):
+        r = admin_client.post(
+            "/admin/api/tags/batch",
+            json={"strategy": "transfer", "count": 3, "strategy_params": {"points": 10}},
+        )
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "UNKNOWN_STRATEGY"
+
+    def test_list_strategies(self, admin_client):
+        r = admin_client.get("/admin/api/strategies")
         assert r.status_code == 200
-        assert r.get_json()["status"] == "unknown"
+        strategies = r.get_json()["strategies"]
+        assert "penalty" in strategies
+        assert "one_time_global" in strategies
+        assert "one_time_per_player" in strategies
+        assert "random" in strategies
+        assert "oneshot" in strategies
 
 
 class TestAdminPlayers:

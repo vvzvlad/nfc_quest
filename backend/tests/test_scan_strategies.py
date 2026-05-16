@@ -154,22 +154,14 @@ class TestStrategies:
         for d in deltas:
             assert 5 <= d <= 10, f"Delta {d} out of inverted range [5, 10]"
 
-    # S-M7: Tag with unknown strategy returns status "unknown"
-    def test_scan_unknown_strategy_tag(self, client, admin_client):
-        # Create a tag using an unrecognised strategy name
+    # S-M7: Batch creation rejects unknown strategy names
+    def test_batch_create_rejects_unknown_strategy(self, admin_client):
         r_batch = admin_client.post(
             "/admin/api/tags/batch",
             json={"strategy": "mystery_box", "strategy_params": {}, "count": 1},
         )
-        assert r_batch.status_code == 201
-        tag_id = r_batch.get_json()["items"][0]["id"]
-
-        start_game(admin_client)
-        register_player(client, make_player_id("player-sm7"), "PlayerSM7")
-
-        r = scan_tag(client, make_player_id("player-sm7"), tag_id)
-        assert r.status_code == 200
-        assert r.get_json()["status"] == "unknown"
+        assert r_batch.status_code == 400
+        assert r_batch.get_json()["error"] == "UNKNOWN_STRATEGY"
 
     # S-M9: one_time_global tag — same player scanning it a second time gets "locked"
     def test_scan_one_time_global_locked_for_original_player(self, client, admin_client):
@@ -284,6 +276,36 @@ class TestStrategies:
         body_mix = r_mix.get_json()
         assert body_mix["status"] == "ok"
         assert -10 <= body_mix["delta"] <= 10, f"Delta {body_mix['delta']} out of range [-10, 10]"
+
+
+    # Penalty strategy — always subtracts points
+    def test_scan_penalty_subtracts_points(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "penalty", {"points": 25})
+        tag_id = tags[0]["id"]
+        register_player(client, make_player_id("player-pen1"), "PlayerPen1")
+
+        r = scan_tag(client, make_player_id("player-pen1"), tag_id)
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["status"] == "ok"
+        assert body["delta"] == -25
+        assert body["total"] == -25
+
+    # Penalty strategy — can be scanned multiple times (not oneshot)
+    def test_scan_penalty_multiple_times(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "penalty", {"points": 10})
+        tag_id = tags[0]["id"]
+        register_player(client, make_player_id("player-pen2"), "PlayerPen2")
+
+        for expected_total in [-10, -20, -30]:
+            rate_limiter.clear()
+            r = scan_tag(client, make_player_id("player-pen2"), tag_id)
+            body = r.get_json()
+            assert body["status"] == "ok"
+            assert body["delta"] == -10
+            assert body["total"] == expected_total
 
 
 class TestRateLimit:

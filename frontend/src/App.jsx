@@ -124,6 +124,11 @@ function PlayerPage() {
       const scanData = scanRes.data;
       setScanResult(scanData);
 
+      if (scanData.total != null) {
+        const cur = getLocalPlayer();
+        if (cur) setLocalPlayer({ ...cur, points: scanData.total });
+      }
+
       const boardRes = await api.scoreboard();
       if (boardRes.ok) {
         setScoreboardData(boardRes.data);

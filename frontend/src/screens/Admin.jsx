@@ -638,6 +638,7 @@ function ScreenAdminTags() {
                 const params = t.strategy === 'random' ? `+${sp.min ?? sp.min_points ?? '?'}…+${sp.max ?? sp.max_points ?? '?'}`
                   : t.strategy === 'oneshot' || t.strategy === 'one_time_global' ? `+${sp.points ?? '?'}`
                   : t.strategy === 'one_time_per_player' ? `+${sp.points ?? '?'}`
+                  : t.strategy === 'penalty' ? `-${sp.points ?? '?'}`
                   : '—';
                 return (
                   <tr key={t.id}
@@ -655,8 +656,8 @@ function ScreenAdminTags() {
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.unique_players_count ?? 0}</td>
                     <td style={{ padding: '5px 12px' }}><StatusBadge s={t.is_blocked ? 'used' : 'active'} /></td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', textAlign: 'right' }}>
-                      <span style={{ marginRight: 12, cursor: 'pointer' }} onClick={() => handleReset(t.id)}>сброс</span>
-                      <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => handleDelete(t.id)}>удал.</span>
+                      <span style={{ marginRight: 12, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleReset(t.id); }}>сброс</span>
+                      <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDelete(t.id); }}>удал.</span>
                     </td>
                   </tr>
                 );
@@ -668,8 +669,8 @@ function ScreenAdminTags() {
           <div style={{ padding: '8px 24px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
             <span>показано {total === 0 ? 0 : (page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
             <span>
-              <span style={{ cursor: 'pointer', marginRight: 12 }} onClick={() => setPage(p => Math.max(1, p - 1))}>←</span>
-              <span style={{ cursor: 'pointer' }} onClick={() => setPage(p => p + 1)}>→</span>
+              <span style={{ cursor: page <= 1 ? 'default' : 'pointer', opacity: page <= 1 ? 0.3 : 1, marginRight: 12 }} onClick={() => { if (page > 1) setPage(p => p - 1); }}>←</span>
+              <span style={{ cursor: page * perPage >= total ? 'default' : 'pointer', opacity: page * perPage >= total ? 0.3 : 1 }} onClick={() => { if (page * perPage < total) setPage(p => p + 1); }}>→</span>
             </span>
           </div>
         </div>
@@ -749,6 +750,7 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
     if (tag.strategy === 'random') return `${sp.min ?? '?'}…${sp.max ?? '?'}`;
     if (tag.strategy === 'oneshot' || tag.strategy === 'one_time_global') return `+${sp.points ?? '?'}`;
     if (tag.strategy === 'one_time_per_player') return `+${sp.points ?? '?'}`;
+    if (tag.strategy === 'penalty') return `-${sp.points ?? '?'}`;
     return JSON.stringify(sp);
   })();
 
@@ -771,6 +773,7 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
               <option value="one_time_global">one_time_global</option>
               <option value="one_time_per_player">one_time_per_player</option>
               <option value="random">random</option>
+              <option value="penalty">penalty</option>
               <option value="oneshot">oneshot</option>
             </select>
           </Field>
@@ -894,6 +897,7 @@ function ScreenAdminTagsCreate({ onBack }) {
             >
               <option value="one_time_per_player">one_time_per_player · раз на игрока</option>
               <option value="random">random · случайные баллы</option>
+              <option value="penalty">penalty · штраф</option>
               <option value="oneshot">oneshot · одноразовая глобально</option>
             </select>
           </Field>
@@ -909,11 +913,10 @@ function ScreenAdminTagsCreate({ onBack }) {
           <div className="hr" />
           <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
             доступные стратегии:<br/>
-            · fixed — фикс. баллы<br/>
-            · random — диапазон min/max<br/>
-            · penalty — отрицательные<br/>
-            · oneshot — одноразовая (стартовая)<br/>
-            · transfer — переводит баллы между игроками
+            · one_time_per_player — раз на игрока<br/>
+            · random — диапазон min…max<br/>
+            · penalty — штраф (отнимает баллы)<br/>
+            · oneshot — одноразовая глобально
           </div>
           <div style={{ flex: 1 }} />
           <button className="btn" style={{ width: '100%' }} onClick={handleCreate} disabled={loading}>
@@ -995,6 +998,7 @@ function StrategyChip({ s }) {
     one_time_global:     { c: 'var(--success)', l: 'one_time_global' },
     one_time_per_player: { c: 'var(--info)',    l: 'per_player'      },
     random:              { c: 'var(--warn)',    l: 'random'          },
+    penalty:             { c: 'var(--accent)',  l: 'penalty'         },
     oneshot:             { c: 'var(--success)', l: 'oneshot'         },
   };
   const m = map[s] || { c: 'var(--muted)', l: String(s || '—') };
@@ -1088,14 +1092,13 @@ function ScreenAdminPlayers() {
       }
       setLoading(false);
     });
+    // Refresh global stats alongside players to keep stat cards accurate
+    adminApi.getStats()
+      .then(r => { if (r.ok) setGlobalStats(r.data); })
+      .catch(() => {});
   }, [page, search]);
 
   React.useEffect(() => { loadPlayers(); }, [loadPlayers]);
-
-  // Load global stats once on mount; not re-fetched on page change since stats are global
-  React.useEffect(() => {
-    adminApi.getStats().then(r => { if (r.ok) setGlobalStats(r.data); });
-  }, []);
 
   const handleAdjust = async (id, nick) => {
     const raw = window.prompt(`Изменить баллы для ${nick} (положительное или отрицательное число):`);
@@ -1192,8 +1195,8 @@ function ScreenAdminPlayers() {
           <div style={{ padding: '8px 16px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
             <span>показано {total === 0 ? 0 : (page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
             <span>
-              <span style={{ cursor: 'pointer', marginRight: 12 }} onClick={() => setPage(p => Math.max(1, p - 1))}>←</span>
-              <span style={{ cursor: 'pointer' }} onClick={() => setPage(p => p + 1)}>→</span>
+              <span style={{ cursor: page <= 1 ? 'default' : 'pointer', opacity: page <= 1 ? 0.3 : 1, marginRight: 12 }} onClick={() => { if (page > 1) setPage(p => p - 1); }}>←</span>
+              <span style={{ cursor: page * perPage >= total ? 'default' : 'pointer', opacity: page * perPage >= total ? 0.3 : 1 }} onClick={() => { if (page * perPage < total) setPage(p => p + 1); }}>→</span>
             </span>
           </div>
         </div>
@@ -1292,8 +1295,8 @@ function ScreenAdminLog() {
           <div style={{ padding: '8px 16px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
             <span>показано {total === 0 ? 0 : (page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}</span>
             <span>
-              <span style={{ cursor: 'pointer', marginRight: 12 }} onClick={() => setPage(p => Math.max(1, p - 1))}>←</span>
-              <span style={{ cursor: 'pointer' }} onClick={() => setPage(p => p + 1)}>→</span>
+              <span style={{ cursor: page <= 1 ? 'default' : 'pointer', opacity: page <= 1 ? 0.3 : 1, marginRight: 12 }} onClick={() => { if (page > 1) setPage(p => p - 1); }}>←</span>
+              <span style={{ cursor: page * perPage >= total ? 'default' : 'pointer', opacity: page * perPage >= total ? 0.3 : 1 }} onClick={() => { if (page * perPage < total) setPage(p => p + 1); }}>→</span>
             </span>
           </div>
         </div>

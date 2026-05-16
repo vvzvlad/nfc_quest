@@ -9,6 +9,10 @@ const ERROR_MESSAGES = {
   TAG_NOT_FOUND:         'Метка не найдена',
   RATE_LIMIT_WAIT:       'Подождите секунду и попробуйте снова.',
 
+  NICK_TOO_LONG:         'Никнейм слишком длинный (максимум 64 символа)',
+  INVALID_NICK:          'Никнейм содержит недопустимые символы',
+  INVALID_PLAYER_ID:     'Некорректный идентификатор игрока',
+
   // Admin API errors
   UNAUTHORIZED:          'Нет доступа — необходима авторизация',
   LOGIN_RATE_LIMIT:      'Слишком много попыток входа. Попробуйте позже',
@@ -16,6 +20,7 @@ const ERROR_MESSAGES = {
   GAME_END_BEFORE_START: 'Конец игры должен быть после начала',
   GAME_TOO_SHORT:        'Игра должна длиться минимум 10 минут',
   INVALID_DELTA:         'delta должен быть числом',
+  UNKNOWN_STRATEGY:      'Неизвестная стратегия',
 };
 
 // Returns the localized message for an error code.

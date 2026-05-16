@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify, session, current_app
 from sqlalchemy import func
 
 from models import db, Player, Tag, ScanEvent, GameSettings, TagPlayerScan
+from strategies import STRATEGIES
 
 admin_api = Blueprint("admin_api", __name__)
 
@@ -77,6 +78,18 @@ def logout():
 @admin_api.route("/me", methods=["GET"])
 def me():
     return jsonify({"authenticated": bool(session.get("admin"))}), 200
+
+
+# ---------------------------------------------------------------------------
+# Strategies
+# ---------------------------------------------------------------------------
+
+
+@admin_api.route("/strategies", methods=["GET"])
+@_require_admin
+def list_strategies():
+    """Return the list of available tag strategy names."""
+    return jsonify({"strategies": sorted(STRATEGIES.keys())}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -307,9 +320,12 @@ def list_tags():
 def create_tags_batch():
     """Generate a batch of new tags with the given strategy."""
     data = request.get_json(silent=True) or {}
-    strategy = data.get("strategy", "unlimited")
+    strategy = data.get("strategy", "one_time_per_player")
     strategy_params = data.get("strategy_params", {})
     count = int(data.get("count", 1))
+
+    if strategy not in STRATEGIES:
+        return jsonify({"error": "UNKNOWN_STRATEGY"}), 400
     label_prefix = data.get("label_prefix", "")
 
     base_url = current_app.config.get("BASE_URL", "http://localhost:5000")

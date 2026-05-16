@@ -594,7 +594,7 @@ function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLab
       strategy="неизвестный tag_id"
       meta="возможно метка из другой игры"
       boardSlice={boardSlice}
-      boardEmpty="Данные недоступны"
+      boardEmpty={boardSlice ? undefined : "Данные недоступны"}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
       timerTarget={timerTarget}

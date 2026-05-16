@@ -91,6 +91,7 @@ export const adminApi = {
 
   getLog: (params = {}) => get('/admin/api/log?' + new URLSearchParams(params)),
   getStats: () => get('/admin/api/stats'),
+  getStrategies: () => get('/admin/api/strategies'),
 };
 
 // ─── WebSocket (Socket.IO) ─────────────────────────────────────────────────
