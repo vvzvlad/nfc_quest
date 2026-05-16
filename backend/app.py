@@ -1,6 +1,3 @@
-import eventlet
-eventlet.monkey_patch()
-
 import os
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
@@ -38,7 +35,7 @@ def create_app(config_class=Config) -> Flask:
     # SocketIO with configurable async mode (use "threading" for tests)
     socketio = SocketIO(
         app,
-        async_mode=app.config.get("SOCKETIO_ASYNC_MODE", "eventlet"),
+        async_mode=app.config.get("SOCKETIO_ASYNC_MODE", "threading"),
         cors_allowed_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     )
 
