@@ -257,9 +257,9 @@ function PlayerPage() {
     }
     if (status === 'locked')     return <ScanLocked   {...commonProps} />;
     if (status === 'not_yet')    return <ScanNotYet   {...commonProps} timerTarget={scanResult.starts_at} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
-    // Find the current player's rank from the scoreboard (1-based, null if not found)
+    // Find the current player's rank using the rank field returned by the scoreboard API
     const myRank = scoreboardData?.players
-      ? (scoreboardData.players.findIndex(p => p.nick === myNick) + 1) || null
+      ? (scoreboardData.players.find(p => p.nick === myNick)?.rank ?? null)
       : null;
     if (status === 'finished') {
       // Show bright winner screen for top-10 players

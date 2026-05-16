@@ -540,7 +540,7 @@ function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLa
 
 // State: quest finished — winner screen for top-10 players
 // Displays a bright fullscreen congratulation with the player's place number
-export function ScanFinishedWinner({ user, score, rank }) {
+function ScanFinishedWinner({ user, score, rank }) {
   // Gold background for top 3, warm amber for places 4-10
   const bgColor = rank <= 3 ? '#f6cd5b' : '#f0b429';
   const placeStr = String(rank).padStart(2, '0');
