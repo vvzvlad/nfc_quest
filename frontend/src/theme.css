@@ -129,6 +129,16 @@
 
 /* ───────────── base ───────────── */
 
+/* Reset browser defaults so the app fills the full viewport without white borders */
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+
 .app, .app * {
   box-sizing: border-box;
   -webkit-font-smoothing: antialiased;

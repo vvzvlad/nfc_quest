@@ -103,6 +103,11 @@ STRATEGIES: dict[str, ScoringStrategy] = {
     ]
 }
 
+# Aliases: "fixed" and "penalty" map to existing strategies for UI compatibility
+STRATEGIES["fixed"] = STRATEGIES["unlimited"]
+STRATEGIES["oneshot"] = STRATEGIES["one_time_global"]
+STRATEGIES["penalty"] = STRATEGIES["unlimited"]
+
 
 def get_strategy(name: str) -> ScoringStrategy | None:
     """Look up a strategy by name. Returns None if not found."""

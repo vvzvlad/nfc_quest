@@ -215,14 +215,17 @@ function ScreenAdminGame() {
   const handleSave = async () => {
     setLoading(true);
     setSaved(false);
-    await adminApi.updateGame({
-      starts_at: settings.starts_at,
-      ends_at: settings.ends_at,
-      award_message: settings.award_message,
-    });
-    await reloadSettings();
-    setSaved(true);
-    setLoading(false);
+    try {
+      await adminApi.updateGame({
+        starts_at: settings.starts_at,
+        ends_at: settings.ends_at,
+        award_message: settings.award_message,
+      });
+      await reloadSettings();
+      setSaved(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleStartGame = async () => {
@@ -593,7 +596,7 @@ function ScreenAdminTagsCreate({ onBack }) {
       label_prefix: labelPrefix,
     });
     if (res.ok) {
-      setCreated(res.data);
+      setCreated(res.data.items || []);
     }
     setLoading(false);
   };
@@ -745,7 +748,7 @@ function StatusBadge({ s }) {
     used:     { c: 'var(--muted)',   l: '○ used' },
     disabled: { c: 'var(--muted-2)', l: '× off' },
   };
-  const m = map[s];
+  const m = map[s] || { c: 'var(--muted)', l: s || '—' };
   return <span className="mono" style={{ fontSize: 11, color: m.c, letterSpacing: '0.06em' }}>{m.l}</span>;
 }
 

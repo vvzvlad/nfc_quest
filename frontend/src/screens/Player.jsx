@@ -523,7 +523,7 @@ function IconLock() {
 
 // ─── Screen 3: Mobile scoreboard ────────────────────────────────
 // Props:
-//   initialData — optional object from api.scoreboard() with { players, game_info }
+//   initialData — optional object from api.scoreboard() with { players, game }
 //
 // Connects to WebSocket for live updates; disconnects on unmount.
 // Identifies "my" row by comparing nick with getLocalPlayer()?.nick.
@@ -533,13 +533,13 @@ function ScreenScoreboardMobile({ initialData }) {
   const myNick = getLocalPlayer()?.nick || null;
   const myScore = getLocalPlayer()?.points ?? 0;
 
-  // scoreboard: array of { nick, score, place } or similar objects from backend
+  // scoreboard: array of { nick, points, rank } from backend
   const [scoreboard, setScoreboard] = React.useState(
     initialData?.players ?? []
   );
   // gameInfo: { status, starts_at, ends_at, award_message }
   const [gameInfo, setGameInfo] = React.useState(
-    initialData?.game_info ?? null
+    initialData?.game ?? null
   );
   // Countdown timer string
   const [timeLeft, setTimeLeft] = React.useState('');
@@ -550,7 +550,7 @@ function ScreenScoreboardMobile({ initialData }) {
       api.scoreboard().then(({ ok, data }) => {
         if (ok && data) {
           if (data.players) setScoreboard(data.players);
-          if (data.game_info) setGameInfo(data.game_info);
+          if (data.game) setGameInfo(data.game);
         }
       }).catch(() => {});
     }
@@ -560,9 +560,9 @@ function ScreenScoreboardMobile({ initialData }) {
   // Connect WebSocket for live scoreboard updates
   React.useEffect(() => {
     connectSocket((update) => {
-      // update expected shape: { players, game_info }
+      // update expected shape: { players, game }
       if (update?.players) setScoreboard(update.players);
-      if (update?.game_info) setGameInfo(update.game_info);
+      if (update?.game) setGameInfo(update.game);
     });
     return () => disconnectSocket();
   }, []);
@@ -619,7 +619,7 @@ function ScreenScoreboardMobile({ initialData }) {
           {scoreboard.map((entry, i) => {
             // Backend may return { nick, score, place } or array — handle both shapes
             const name  = entry.nick  ?? entry[0];
-            const pts   = entry.score ?? entry[1];
+            const pts   = entry.points ?? entry.score ?? entry[1];
             const place = entry.place ?? (i + 1);
             const isMine = myNick && name === myNick;
             return (

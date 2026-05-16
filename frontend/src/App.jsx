@@ -72,6 +72,7 @@ function PlayerPage() {
   const [phase, setPhase] = React.useState(null); // null = initialising
   const [registrationError, setRegistrationError] = React.useState(null);
   const [scanResult, setScanResult] = React.useState(null);
+  const [scoreboardData, setScoreboardData] = React.useState(null);
 
   // On mount: decide whether to show registration or go straight to scanning
   React.useEffect(() => {
@@ -97,9 +98,24 @@ function PlayerPage() {
         setScanResult(data);
         setPhase('result');
       }
+      // Load scoreboard after scan to populate leaderboard in result screens
+      api.scoreboard().then(r => {
+        if (r.ok) setScoreboardData(r.data);
+      }).catch(() => {});
     } catch (err) {
       setPhase('error');
     }
+  }
+
+  // Build a boardSlice array centered around the current player for ScanResultLayout.
+  // Format: [place, nick, points, opts?]
+  function buildBoardSlice(players, myNick) {
+    if (!players || players.length === 0) return null;
+    const myIdx = players.findIndex(p => p.nick === myNick);
+    const center = myIdx >= 0 ? myIdx : 0;
+    const start = Math.max(0, center - 2);
+    const slice = players.slice(start, start + 5);
+    return slice.map(p => [p.rank, p.nick, p.points, p.nick === myNick ? { mine: true } : undefined]);
   }
 
   // Called by ScreenRegistration when the user submits the nick form
@@ -143,23 +159,52 @@ function PlayerPage() {
   }
 
   if (phase === 'error') {
-    // Generic fallback for unexpected errors
-    return <ScanUnknown />;
+    // Generic fallback for unexpected errors — pass what we know about the player
+    const player = getLocalPlayer();
+    return <ScanUnknown user={player?.nick} score={player?.points} tagId={tagId} />;
   }
 
   // phase === 'result': pick screen by status + delta
   if (phase === 'result' && scanResult) {
     const { status, delta } = scanResult;
 
+    // Common props for all result screens
+    const player = getLocalPlayer();
+    const myNick = player?.nick;
+    const boardSlice = buildBoardSlice(scoreboardData?.players, myNick) || undefined;
+    const game = scoreboardData?.game;
+    const boardTimer = game?.status === 'active' && game?.ends_at
+      ? (() => {
+          const diff = Math.max(0, new Date(game.ends_at).getTime() - Date.now());
+          const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
+          const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+          const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+          return `${h}:${m}:${s}`;
+        })()
+      : '';
+    const commonProps = { user: myNick, score: player?.points, tagId, boardSlice, boardTimer };
+
     if (status === 'ok') {
-      return delta >= 0 ? <ScanSuccessPlus /> : <ScanSuccessMinus />;
+      // Props shared between plus and minus success screens
+      const commonScanProps = {
+        ...commonProps,
+        score: scanResult.total,
+        delta: scanResult.delta,
+        meta: scanResult.meta,
+        strategyDisplay: scanResult.strategy_display,
+        boardSlice,
+        boardTimer,
+      };
+      return delta >= 0
+        ? <ScanSuccessPlus  {...commonScanProps} />
+        : <ScanSuccessMinus {...commonScanProps} />;
     }
-    if (status === 'locked')     return <ScanLocked />;
-    if (status === 'not_yet')    return <ScanNotYet />;
-    if (status === 'finished')   return <ScanFinished />;
-    if (status === 'rate_limit') return <ScanRateLimit />;
+    if (status === 'locked')     return <ScanLocked   {...commonProps} />;
+    if (status === 'not_yet')    return <ScanNotYet   {...commonProps} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
+    if (status === 'finished')   return <ScanFinished {...commonProps} awardMessage={scanResult.award_message} />;
+    if (status === 'rate_limit') return <ScanRateLimit {...commonProps} />;
     // Covers 'unknown' and any unexpected status values
-    return <ScanUnknown />;
+    return <ScanUnknown {...commonProps} />;
   }
 
   return null;

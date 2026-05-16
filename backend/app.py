@@ -53,7 +53,7 @@ def create_app(config_class=Config) -> Flask:
     # ---------------------------------------------------------------------------
     # Serve frontend static files for all non-API routes
     # ---------------------------------------------------------------------------
-    frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+    frontend_dist = os.path.join(os.path.dirname(__file__), "..", "static")
     frontend_dist = os.path.abspath(frontend_dist)
 
     @app.route("/", defaults={"path": ""})
