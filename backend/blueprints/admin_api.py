@@ -126,6 +126,8 @@ def stop_game():
 @_require_admin
 def delete_all_players():
     """Delete all players, scan events, and tag-player scan records."""
+    from socket_events import broadcast_scoreboard
+
     count = db.session.query(Player).count()
     db.session.query(TagPlayerScan).delete()
     db.session.query(ScanEvent).delete()
@@ -133,6 +135,7 @@ def delete_all_players():
     # Reset all tag block states so tags work for new players after a game restart
     db.session.query(Tag).update({"is_blocked": False})
     db.session.commit()
+    broadcast_scoreboard()
     return jsonify({"ok": True, "deleted": count}), 200
 
 
@@ -195,6 +198,8 @@ def adjust_player(player_id):
 @_require_admin
 def delete_player(player_id):
     """Delete a single player and their scan events."""
+    from socket_events import broadcast_scoreboard
+
     player = db.session.get(Player, player_id)
     if player is None:
         return jsonify({"error": "Player not found"}), 404
@@ -203,6 +208,7 @@ def delete_player(player_id):
     db.session.query(ScanEvent).filter_by(player_id=player_id).delete()
     db.session.delete(player)
     db.session.commit()
+    broadcast_scoreboard()
     return jsonify({"ok": True}), 200
 
 

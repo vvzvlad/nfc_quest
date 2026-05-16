@@ -1,6 +1,8 @@
 import random as _random
 from abc import ABC, abstractmethod
 
+from sqlalchemy import update
+
 
 class ScoringStrategy(ABC):
     """Base class for all tag scoring strategies."""
@@ -29,12 +31,15 @@ class OneTimeGlobalStrategy(ScoringStrategy):
     name = "one_time_global"
 
     def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
-        if tag.is_blocked:
+        from models import Tag
+
+        result = db_session.execute(
+            update(Tag).where(Tag.id == tag.id, Tag.is_blocked == False).values(is_blocked=True)
+        )
+        if result.rowcount == 0:
             return 0, "locked"
 
         points = int((tag.strategy_params or {}).get("points", 0))
-        tag.is_blocked = True
-        db_session.add(tag)
         return points, "ok"
 
 
