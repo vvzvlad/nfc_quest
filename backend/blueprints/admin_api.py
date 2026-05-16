@@ -25,7 +25,7 @@ def _require_admin(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get("admin"):
-            return jsonify({"error": "Unauthorized"}), 401
+            return jsonify({"error": "Не авторизован"}), 401
         return f(*args, **kwargs)
     return decorated
 
@@ -51,7 +51,7 @@ def _check_login_rate_limit() -> bool:
 @admin_api.route("/login", methods=["POST"])
 def login():
     if _check_login_rate_limit():
-        return jsonify({"error": "Too many login attempts. Try again later."}), 429
+        return jsonify({"error": "Слишком много попыток входа. Попробуйте позже."}), 429
 
     data = request.get_json(silent=True) or {}
     password = data.get("password", "")
@@ -65,7 +65,7 @@ def login():
         return jsonify({"ok": True}), 200
 
     _login_attempts.setdefault(ip, []).append(now)
-    return jsonify({"error": "Invalid password"}), 401
+    return jsonify({"error": "Неверный пароль"}), 401
 
 
 @admin_api.route("/logout", methods=["POST"])
@@ -112,9 +112,9 @@ def put_game():
     if settings.starts_at is not None and settings.ends_at is not None:
         min_duration = timedelta(minutes=10)
         if settings.ends_at <= settings.starts_at:
-            return jsonify({"error": "ends_at must be after starts_at"}), 400
+            return jsonify({"error": "Конец игры должен быть после начала"}), 400
         if (settings.ends_at - settings.starts_at) < min_duration:
-            return jsonify({"error": "Game must last at least 10 minutes"}), 400
+            return jsonify({"error": "Игра должна длиться минимум 10 минут"}), 400
 
     db.session.commit()
     return jsonify(settings.to_dict()), 200
@@ -211,12 +211,12 @@ def adjust_player(player_id):
 
     player = db.session.get(Player, player_id)
     if player is None:
-        return jsonify({"error": "Player not found"}), 404
+        return jsonify({"error": "Игрок не найден"}), 404
 
     try:
         delta_int = int(delta)
     except (TypeError, ValueError):
-        return jsonify({"error": "delta must be a number"}), 400
+        return jsonify({"error": "delta должен быть числом"}), 400
 
     player.points += delta_int
     db.session.commit()
@@ -236,7 +236,7 @@ def delete_player(player_id):
 
     player = db.session.get(Player, player_id)
     if player is None:
-        return jsonify({"error": "Player not found"}), 404
+        return jsonify({"error": "Игрок не найден"}), 404
 
     db.session.query(TagPlayerScan).filter_by(player_id=player_id).delete()
     db.session.query(ScanEvent).filter_by(player_id=player_id).delete()
@@ -343,7 +343,7 @@ def update_tag(tag_id):
     """Update a tag's strategy, params, or label."""
     tag = db.session.get(Tag, tag_id)
     if tag is None:
-        return jsonify({"error": "Tag not found"}), 404
+        return jsonify({"error": "Метка не найдена"}), 404
 
     data = request.get_json(silent=True) or {}
 
@@ -364,7 +364,7 @@ def delete_tag(tag_id):
     """Delete a tag and all related records."""
     tag = db.session.get(Tag, tag_id)
     if tag is None:
-        return jsonify({"error": "Tag not found"}), 404
+        return jsonify({"error": "Метка не найдена"}), 404
 
     db.session.query(TagPlayerScan).filter_by(tag_id=tag_id).delete()
     db.session.query(ScanEvent).filter_by(tag_id=tag_id).delete()
@@ -379,7 +379,7 @@ def reset_tag(tag_id):
     """Unblock tag and clear per-player scan records."""
     tag = db.session.get(Tag, tag_id)
     if tag is None:
-        return jsonify({"error": "Tag not found"}), 404
+        return jsonify({"error": "Метка не найдена"}), 404
 
     tag.is_blocked = False
     db.session.query(TagPlayerScan).filter_by(tag_id=tag_id).delete()

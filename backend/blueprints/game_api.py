@@ -44,14 +44,14 @@ def register():
     nick = (data.get("nick") or "").strip()
 
     if not player_id or not nick:
-        return jsonify({"error": "player_id and nick are required"}), 400
+        return jsonify({"error": "Необходимы player_id и nick"}), 400
 
     # Block registration if the game has already ended
     settings = db.session.get(GameSettings, 1)
     if settings is not None:
         now = datetime.now(timezone.utc)
         if settings.get_status(now) == "finished":
-            return jsonify({"error": "Registration is closed — the game has ended"}), 403
+            return jsonify({"error": "Регистрация закрыта — игра завершена"}), 403
 
     # Idempotency: if player_id already exists, return existing player
     existing_by_id = db.session.get(Player, player_id)
@@ -65,7 +65,7 @@ def register():
     # Nick conflict: another player already holds this nick
     existing_by_nick = db.session.query(Player).filter_by(nick=nick).first()
     if existing_by_nick and existing_by_nick.id != player_id:
-        return jsonify({"error": "Nickname is already taken"}), 409
+        return jsonify({"error": "Никнейм уже занят"}), 409
 
     player = Player(id=player_id, nick=nick, points=0)
     db.session.add(player)
@@ -73,7 +73,7 @@ def register():
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        return jsonify({"error": "Nickname is already taken"}), 409
+        return jsonify({"error": "Никнейм уже занят"}), 409
 
     return jsonify({
         "player_id": player.id,
@@ -94,7 +94,7 @@ def scan():
     player_id = (data.get("player_id") or "").strip()
 
     if not tag_id or not player_id:
-        return jsonify({"error": "tag_id and player_id are required"}), 400
+        return jsonify({"error": "Необходимы tag_id и player_id"}), 400
 
     # --- Rate limit check ---
     now = datetime.now(timezone.utc)
@@ -132,7 +132,7 @@ def scan():
     # --- Player lookup ---
     player = db.session.get(Player, player_id)
     if player is None:
-        return jsonify({"error": "Player not found"}), 404
+        return jsonify({"error": "Игрок не найден"}), 404
 
     # --- Tag lookup ---
     tag = db.session.get(Tag, tag_id)
