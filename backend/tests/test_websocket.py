@@ -98,3 +98,35 @@ def test_ws_broadcast_to_multiple_clients(app, client, admin_client):
         # Always disconnect to release SocketIO resources
         ws_client_1.disconnect()
         ws_client_2.disconnect()
+
+
+def test_ws_no_broadcast_on_locked_scan(app, client, admin_client, ws_client):
+    """H2b: A locked scan must NOT trigger a scoreboard_update broadcast."""
+    from helpers import start_game, create_tag, register_player, scan_tag
+    from blueprints.game_api import rate_limiter
+
+    # Setup: start game, register player, create one_time_global tag
+    start_game(admin_client)
+    register_player(client, "player-h2b", "PlayerH2B")
+    tags = create_tag(admin_client, "one_time_global", {"points": 10})
+    tag_id = tags[0]["id"]
+
+    # First scan succeeds and locks the tag
+    rate_limiter.clear()
+    r1 = scan_tag(client, "player-h2b", tag_id)
+    assert r1.get_json()["status"] == "ok"
+
+    # Drain all events so far (connect + first scan broadcast)
+    ws_client.get_received()
+
+    # Second scan on the same one_time_global tag — must be locked
+    rate_limiter.clear()
+    r2 = scan_tag(client, "player-h2b", tag_id)
+    assert r2.get_json()["status"] == "locked"
+
+    # A locked scan must NOT produce a scoreboard_update broadcast
+    received = ws_client.get_received()
+    broadcast_events = [e for e in received if e["name"] == "scoreboard_update"]
+    assert len(broadcast_events) == 0, (
+        "scoreboard_update must not be broadcast after a locked scan"
+    )
