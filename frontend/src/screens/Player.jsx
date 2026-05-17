@@ -119,6 +119,7 @@ function ScreenRegistration({ onRegister, error, tagId }) {
             onChange={e => setNick(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="напр. r00t_kit"
+            maxLength={64}
           />
           {displayError && (
             <div style={{ fontSize: 13, color: 'var(--accent)', marginTop: 4, lineHeight: 1.4 }}>

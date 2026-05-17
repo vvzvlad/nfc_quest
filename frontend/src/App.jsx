@@ -93,14 +93,30 @@ function PlayerPage() {
   const [scanResult, setScanResult] = React.useState(null);
   const [scoreboardData, setScoreboardData] = React.useState(null);
 
-  // On mount: decide whether to show registration or go straight to scanning
+  // On mount: decide whether to show registration or go straight to scanning.
+  // If we already scanned this tag in this browser tab, show cached result
+  // instead of re-POSTing (prevents accidental re-scans on refresh).
   React.useEffect(() => {
     const player = getLocalPlayer();
     if (!player) {
       setPhase('registration');
-    } else {
-      doScan(tagId, player.player_id);
+      return;
     }
+
+    const cached = sessionStorage.getItem('scan_result_' + tagId);
+    if (cached) {
+      try {
+        const { scanData, boardData } = JSON.parse(cached);
+        setScanResult(scanData);
+        setScoreboardData(boardData);
+        setPhase('result');
+        // Refresh scoreboard in background (GET, no side effects)
+        api.scoreboard().then(r => { if (r.ok) setScoreboardData(r.data); });
+        return;
+      } catch { /* corrupted cache — fall through to fresh scan */ }
+    }
+
+    doScan(tagId, player.player_id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tagId]);
 
@@ -111,9 +127,9 @@ function PlayerPage() {
       const scanRes = await api.scan(tag_id, player_id);
 
       if (!scanRes.ok) {
-        // If the player was deleted server-side, clear stale localStorage and re-register
         if (scanRes.data?.error === 'PLAYER_NOT_FOUND') {
           clearLocalPlayer();
+          sessionStorage.removeItem('scan_result_' + tag_id);
           setPhase('registration');
           return;
         }
@@ -133,6 +149,12 @@ function PlayerPage() {
       if (boardRes.ok) {
         setScoreboardData(boardRes.data);
       }
+
+      // Cache scan result so refresh doesn't re-POST
+      sessionStorage.setItem('scan_result_' + tag_id, JSON.stringify({
+        scanData,
+        boardData: boardRes.ok ? boardRes.data : null,
+      }));
 
       setPhase('result');
     } catch (err) {

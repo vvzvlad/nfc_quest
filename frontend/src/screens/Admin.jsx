@@ -531,23 +531,32 @@ function ScreenAdminTags() {
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState('');
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [showCreate, setShowCreate] = React.useState(false);
   const [selectedTag, setSelectedTag] = React.useState(null);
   const [exportingTags, setExportingTags] = React.useState(false);
   const perPage = 50;
+  const requestIdRef = React.useRef(0);
+
+  React.useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(id);
+  }, [search]);
 
   const loadTags = React.useCallback(() => {
     setLoading(true);
+    const reqId = ++requestIdRef.current;
     const params = { page, per_page: perPage };
-    if (search.trim()) params.search = search.trim();
+    if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
     adminApi.getTags(params).then(r => {
+      if (reqId !== requestIdRef.current) return;
       if (r.ok) {
         setTags(r.data.items || []);
         setTotal(r.data.total || 0);
       }
       setLoading(false);
     });
-  }, [page, search]);
+  }, [page, debouncedSearch]);
 
   React.useEffect(() => { loadTags(); }, [loadTags]);
 
@@ -635,10 +644,10 @@ function ScreenAdminTags() {
               {tags.map((t, i) => {
                 // Build params display from strategy_params object returned by API
                 const sp = t.strategy_params || {};
-                const params = t.strategy === 'random' ? `+${sp.min ?? sp.min_points ?? '?'}…+${sp.max ?? sp.max_points ?? '?'}`
-                  : t.strategy === 'oneshot' || t.strategy === 'one_time_global' ? `+${sp.points ?? '?'}`
-                  : t.strategy === 'one_time_per_player' ? `+${sp.points ?? '?'}`
-                  : t.strategy === 'penalty' ? `-${sp.points ?? '?'}`
+                const fmtPts = (v) => { const n = Number(v); return isNaN(n) ? '?' : (n > 0 ? `+${n}` : String(n)); };
+                const params = t.strategy === 'random' ? `${sp.min ?? sp.min_points ?? '?'}…${sp.max ?? sp.max_points ?? '?'}`
+                  : t.strategy === 'oneshot' || t.strategy === 'one_time_global' ? fmtPts(sp.points)
+                  : t.strategy === 'one_time_per_player' ? fmtPts(sp.points)
                   : '—';
                 return (
                   <tr key={t.id}
@@ -747,10 +756,10 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
 
   const sp = tag.strategy_params || {};
   const paramsDisplay = (() => {
+    const fmtPts = (v) => { const n = Number(v); return isNaN(n) ? '?' : (n > 0 ? `+${n}` : String(n)); };
     if (tag.strategy === 'random') return `${sp.min ?? '?'}…${sp.max ?? '?'}`;
-    if (tag.strategy === 'oneshot' || tag.strategy === 'one_time_global') return `+${sp.points ?? '?'}`;
-    if (tag.strategy === 'one_time_per_player') return `+${sp.points ?? '?'}`;
-    if (tag.strategy === 'penalty') return `-${sp.points ?? '?'}`;
+    if (tag.strategy === 'oneshot' || tag.strategy === 'one_time_global') return fmtPts(sp.points);
+    if (tag.strategy === 'one_time_per_player') return fmtPts(sp.points);
     return JSON.stringify(sp);
   })();
 
@@ -773,7 +782,6 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
               <option value="one_time_global">one_time_global</option>
               <option value="one_time_per_player">one_time_per_player</option>
               <option value="random">random</option>
-              <option value="penalty">penalty</option>
               <option value="oneshot">oneshot</option>
             </select>
           </Field>
@@ -848,6 +856,7 @@ function KVList({ items }) {
 function ScreenAdminTagsCreate({ onBack }) {
   const [strategy, setStrategy] = React.useState('one_time_per_player');
   const [points, setPoints] = React.useState('50');
+  const [minPoints, setMinPoints] = React.useState('0');
   const [labelPrefix, setLabelPrefix] = React.useState('hall · ');
   const [count, setCount] = React.useState('12');
   const [created, setCreated] = React.useState(null); // array of {id, url}
@@ -856,7 +865,7 @@ function ScreenAdminTagsCreate({ onBack }) {
   const handleCreate = async () => {
     setLoading(true);
     const strategyParams = strategy === 'random'
-      ? { min_points: 10, max_points: parseInt(points) || 50 }
+      ? { min: parseInt(minPoints) || 0, max: parseInt(points) || 50 }
       : { points: parseInt(points) || 50 };
     const res = await adminApi.createTagsBatch({
       strategy,
@@ -897,13 +906,23 @@ function ScreenAdminTagsCreate({ onBack }) {
             >
               <option value="one_time_per_player">one_time_per_player · раз на игрока</option>
               <option value="random">random · случайные баллы</option>
-              <option value="penalty">penalty · штраф</option>
               <option value="oneshot">oneshot · одноразовая глобально</option>
             </select>
           </Field>
-          <Field label="баллы">
-            <input className="input" value={points} onChange={e => setPoints(e.target.value)} />
-          </Field>
+          {strategy === 'random' ? (
+            <>
+              <Field label="мин. баллы">
+                <input className="input tabular" value={minPoints} onChange={e => setMinPoints(e.target.value)} />
+              </Field>
+              <Field label="макс. баллы">
+                <input className="input tabular" value={points} onChange={e => setPoints(e.target.value)} />
+              </Field>
+            </>
+          ) : (
+            <Field label="баллы">
+              <input className="input" value={points} onChange={e => setPoints(e.target.value)} />
+            </Field>
+          )}
           <Field label="префикс label">
             <input className="input" value={labelPrefix} onChange={e => setLabelPrefix(e.target.value)} placeholder="например: zal-A · " />
           </Field>
@@ -913,9 +932,8 @@ function ScreenAdminTagsCreate({ onBack }) {
           <div className="hr" />
           <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
             доступные стратегии:<br/>
-            · one_time_per_player — раз на игрока<br/>
+            · one_time_per_player — раз на игрока (отр. баллы = штраф)<br/>
             · random — диапазон min…max<br/>
-            · penalty — штраф (отнимает баллы)<br/>
             · oneshot — одноразовая глобально
           </div>
           <div style={{ flex: 1 }} />
@@ -998,7 +1016,6 @@ function StrategyChip({ s }) {
     one_time_global:     { c: 'var(--success)', l: 'one_time_global' },
     one_time_per_player: { c: 'var(--info)',    l: 'per_player'      },
     random:              { c: 'var(--warn)',    l: 'random'          },
-    penalty:             { c: 'var(--accent)',  l: 'penalty'         },
     oneshot:             { c: 'var(--success)', l: 'oneshot'         },
   };
   const m = map[s] || { c: 'var(--muted)', l: String(s || '—') };
@@ -1077,28 +1094,41 @@ function ScreenAdminPlayers() {
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState('');
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [exportingPlayers, setExportingPlayers] = React.useState(false);
   const [globalStats, setGlobalStats] = React.useState(null);
   const perPage = 50;
+  const requestIdRef = React.useRef(0);
+
+  React.useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(id);
+  }, [search]);
 
   const loadPlayers = React.useCallback(() => {
     setLoading(true);
+    const reqId = ++requestIdRef.current;
     const params = { page, per_page: perPage };
-    if (search.trim()) params.search = search.trim();
+    if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
     adminApi.getPlayers(params).then(r => {
+      if (reqId !== requestIdRef.current) return;
       if (r.ok) {
         setPlayers(r.data.items || []);
         setTotal(r.data.total || 0);
       }
       setLoading(false);
     });
-    // Refresh global stats alongside players to keep stat cards accurate
+  }, [page, debouncedSearch]);
+
+  React.useEffect(() => { loadPlayers(); }, [loadPlayers]);
+
+  const reloadStats = React.useCallback(() => {
     adminApi.getStats()
       .then(r => { if (r.ok) setGlobalStats(r.data); })
       .catch(() => {});
-  }, [page, search]);
+  }, []);
 
-  React.useEffect(() => { loadPlayers(); }, [loadPlayers]);
+  React.useEffect(() => { reloadStats(); }, [reloadStats]);
 
   const handleAdjust = async (id, nick) => {
     const raw = window.prompt(`Изменить баллы для ${nick} (положительное или отрицательное число):`);
@@ -1107,12 +1137,14 @@ function ScreenAdminPlayers() {
     if (isNaN(delta)) return;
     await adminApi.adjustPlayer(id, delta);
     loadPlayers();
+    reloadStats();
   };
 
   const handleDelete = async (id, nick) => {
     if (!window.confirm(`Удалить участника ${nick}?`)) return;
     await adminApi.deletePlayer(id);
     loadPlayers();
+    reloadStats();
   };
 
   return (

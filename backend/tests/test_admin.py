@@ -322,7 +322,6 @@ class TestAdminTags:
         r = admin_client.get("/admin/api/strategies")
         assert r.status_code == 200
         strategies = r.get_json()["strategies"]
-        assert "penalty" in strategies
         assert "one_time_global" in strategies
         assert "one_time_per_player" in strategies
         assert "random" in strategies

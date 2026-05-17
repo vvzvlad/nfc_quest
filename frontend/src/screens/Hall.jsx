@@ -1,7 +1,7 @@
 import React from 'react';
 import { QuestCtx } from '../QuestContext.js';
 import { CornerBrackets } from './Player.jsx';
-import { connectSocket, disconnectSocket, getLocalPlayer, api } from '../api.js';
+import { connectSocket, disconnectSocket, api } from '../api.js';
 
 // Hall.jsx — Hall scoreboard (1920x1080 big screen)
 // Designed for projection / 50" TV in a hallway. High contrast, no chrome.
@@ -170,8 +170,6 @@ function ScreenHallScoreboard() {
                   place={i + 1}
                   name={entry.nick}
                   score={entry.points}
-                  mine={entry.nick === getLocalPlayer()?.nick}
-                  hall
                 />
               ))}
             </div>
@@ -182,8 +180,6 @@ function ScreenHallScoreboard() {
                   place={i + 13}
                   name={entry.nick}
                   score={entry.points}
-                  mine={entry.nick === getLocalPlayer()?.nick}
-                  hall
                 />
               ))}
             </div>
@@ -271,23 +267,19 @@ function Stat({ label, value }) {
   );
 }
 
-function HallRow({ place, name, score, mine }) {
+function HallRow({ place, name, score }) {
   const medal = place === 1 ? 'var(--gold)' : place === 2 ? 'var(--silver)' : place === 3 ? 'var(--bronze)' : null;
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '48px 1fr auto',
       alignItems: 'center', padding: '10px 6px',
       borderBottom: '1px solid var(--line)',
-      background: mine ? 'rgba(230,57,53,0.10)' : 'transparent',
-      position: 'relative',
     }}>
-      {mine && <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'var(--accent)' }} />}
       <div className="mono" style={{ fontSize: 16, color: medal ?? 'var(--muted)', fontWeight: 700 }}>{String(place).padStart(2,'0')}</div>
       <div style={{
-        fontFamily: 'var(--font-mono)', fontSize: 18, color: mine ? 'var(--fg)' : 'var(--fg-2)',
-        fontWeight: mine ? 600 : 400,
+        fontFamily: 'var(--font-mono)', fontSize: 18, color: 'var(--fg-2)',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
-      }}>{name}{mine && <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 12 }}>· ВЫ</span>}</div>
+      }}>{name}</div>
       <div className="tabular" style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: 'var(--fg)' }}>{score}</div>
     </div>
   );
