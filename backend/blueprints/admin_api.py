@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, session, current_app
-from sqlalchemy import func
+from sqlalchemy import func, case
 
 from models import db, Player, Tag, ScanEvent, GameSettings, TagPlayerScan
 from strategies import STRATEGIES
@@ -189,27 +189,65 @@ def delete_all_players():
 @admin_api.route("/players", methods=["GET"])
 @_require_admin
 def list_players():
-    """Paginated player list with search and scan stats."""
+    """Paginated player list with search, sort, and scan stats."""
     page, per_page = _get_pagination_args()
     search = request.args.get("search", "").strip()
+    sort_by = request.args.get("sort_by", "points")
 
     query = db.session.query(Player)
     if search:
         query = query.filter(Player.nick.ilike(f"%{search}%"))
 
     total = query.count()
-    players = query.order_by(Player.points.desc()).offset((page - 1) * per_page).limit(per_page).all()
+
+    # Apply sort order: by points desc (default) or by last scan activity desc (nulls last)
+    if sort_by == "last_seen":
+        last_scan_subq = (
+            db.session.query(ScanEvent.player_id, func.max(ScanEvent.scanned_at).label("last_scan"))
+            .filter(ScanEvent.result != "adjust")  # exclude admin adjustments from sort order
+            .group_by(ScanEvent.player_id)
+            .subquery()
+        )
+        query = query.outerjoin(last_scan_subq, Player.id == last_scan_subq.c.player_id)
+        query = query.order_by(last_scan_subq.c.last_scan.desc().nullslast())
+    else:
+        query = query.order_by(Player.points.desc())
+
+    players = query.offset((page - 1) * per_page).limit(per_page).all()
+
+    # Pre-load last scan times for all returned players in one query (avoids N+1)
+    player_ids = [p.id for p in players]
+    last_seen_rows = (
+        db.session.query(ScanEvent.player_id, func.max(ScanEvent.scanned_at).label("last_scan"))
+        .filter(ScanEvent.player_id.in_(player_ids), ScanEvent.result != "adjust")
+        .group_by(ScanEvent.player_id)
+        .all()
+    )
+    last_seen_map = {row.player_id: row.last_scan for row in last_seen_rows}
+
+    # Batch-load scan_count and penalty_count for all page players in one query
+    scan_stats_rows = (
+        db.session.query(
+            ScanEvent.player_id,
+            func.count(case((ScanEvent.result == "ok", 1))).label("scan_count"),
+            func.count(
+                case(((ScanEvent.delta_points < 0) & (ScanEvent.result != "adjust"), 1))
+            ).label("penalty_count"),
+        )
+        .filter(ScanEvent.player_id.in_(player_ids))
+        .group_by(ScanEvent.player_id)
+        .all()
+    )
+    scan_stats_map = {row.player_id: (row.scan_count, row.penalty_count) for row in scan_stats_rows}
 
     items = []
     for p in players:
-        scan_count = db.session.query(ScanEvent).filter_by(player_id=p.id, result="ok").count()
-        penalty_count = db.session.query(ScanEvent).filter(
-            ScanEvent.player_id == p.id,
-            ScanEvent.delta_points < 0,
-        ).count()
+        scan_count, penalty_count = scan_stats_map.get(p.id, (0, 0))
+        last_scan_dt = last_seen_map.get(p.id)
         item = p.to_dict()
         item["scan_count"] = scan_count
         item["penalty_count"] = penalty_count
+        item["last_seen"] = last_scan_dt.strftime("%Y-%m-%dT%H:%M:%SZ") if last_scan_dt else None
         items.append(item)
 
     return jsonify({"items": items, "total": total, "page": page, "per_page": per_page}), 200
@@ -235,6 +273,15 @@ def adjust_player(player_id):
         return jsonify({"error": "DELTA_OUT_OF_RANGE"}), 400
 
     player.points += delta_int
+
+    # Log the adjustment as a special scan event for audit trail
+    adjustment_event = ScanEvent(
+        tag_id=None,
+        player_id=player_id,
+        delta_points=delta_int,
+        result="adjust",
+    )
+    db.session.add(adjustment_event)
     db.session.commit()
 
     # Broadcast updated scoreboard to all connected WebSocket clients

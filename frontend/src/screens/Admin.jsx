@@ -313,6 +313,12 @@ function ScreenAdminGame() {
   }, []);
 
   const reloadSettings = () => adminApi.getGame().then(r => { if (r.ok) setSettings(r.data); });
+
+  // Periodically refresh settings so gameStatus-based disabled states stay accurate
+  React.useEffect(() => {
+    const id = setInterval(reloadSettings, 10000);
+    return () => clearInterval(id);
+  }, []);
   const reloadStats = () => adminApi.getStats().then(r => { if (r.ok) setStats(r.data); });
 
   const handleSave = async () => {
@@ -344,13 +350,13 @@ function ScreenAdminGame() {
   };
 
   const handleDeleteAllPlayers = async () => {
-    if (!window.confirm('Удалить всех участников? Это действие необратимо.')) return;
+    if (!window.confirm(`Удалить всех участников (${stats.total_players ?? 0})? Это действие необратимо.`)) return;
     await adminApi.deleteAllPlayers();
     await reloadStats();
   };
 
   const handleDeleteAllTags = async () => {
-    if (!window.confirm('Удалить все метки? Это действие необратимо.')) return;
+    if (!window.confirm(`Удалить все метки (${stats.total_tags ?? 0})? Это действие необратимо.`)) return;
     await adminApi.deleteAllTags();
     await reloadStats();
   };
@@ -382,7 +388,7 @@ function ScreenAdminGame() {
         <div style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 28, overflow: 'auto' }}>
           <SectionBlock title="01 · временные рамки" desc="Когда квест открывается и закрывается. Между этими моментами участники могут сканировать метки.">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <Field label="начало игры" hint="МСК">
+              <Field label="начало игры">
                 <input
                   className="input"
                   type="datetime-local"
@@ -390,7 +396,7 @@ function ScreenAdminGame() {
                   onChange={e => setSettings(s => ({ ...s, starts_at: e.target.value ? localInputToUtc(e.target.value) : null }))}
                 />
               </Field>
-              <Field label="конец игры" hint="МСК">
+              <Field label="конец игры">
                 <input
                   className="input"
                   type="datetime-local"
@@ -413,8 +419,8 @@ function ScreenAdminGame() {
 
           <SectionBlock title="03 · опасная зона" desc="Действия без отмены. Подтверждение через диалог.">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
-              <DangerBtn label="Запустить игру сейчас" sub="откроет окно сканирования всем" onClick={handleStartGame} />
-              <DangerBtn label="Остановить игру" sub="закроет сканирование, табло остаётся" danger onClick={handleStopGame} />
+              <DangerBtn label="Запустить игру сейчас" sub="откроет окно сканирования всем" onClick={handleStartGame} disabled={gameStatus === 'АКТИВНА'} />
+              <DangerBtn label="Остановить игру" sub="закроет сканирование, табло остаётся" danger onClick={handleStopGame} disabled={gameStatus !== 'АКТИВНА'} />
               <DangerBtn label="Очистить список участников" sub={`удалит ${stats.total_players ?? 0} UUID и баллы`} danger onClick={handleDeleteAllPlayers} />
               <DangerBtn label="Очистить список меток" sub={`удалит ${stats.total_tags ?? 0} tag_id и события`} danger onClick={handleDeleteAllTags} />
             </div>
@@ -495,16 +501,17 @@ function DateTimeField({ date, time }) {
   );
 }
 
-function DangerBtn({ label, sub, danger, onClick }) {
+function DangerBtn({ label, sub, danger, onClick, disabled }) {
   return (
     <div
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 12, padding: '14px 16px',
         border: '1px solid ' + (danger ? 'var(--accent)' : 'var(--line-2)'),
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
       }}
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
     >
       <div>
         <div style={{ fontSize: 14, fontWeight: 600, color: danger ? 'var(--accent)' : 'var(--fg)' }}>{label}</div>
@@ -670,6 +677,13 @@ function ScreenAdminTags() {
                   </tr>
                 );
               })}
+              {!loading && tags.length === 0 && (
+                <tr>
+                  <td colSpan={8} style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--muted)' }}>
+                    {debouncedSearch ? 'Метки не найдены по запросу' : 'Метки не созданы. Нажмите «+ создать пачку».'}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
 
@@ -969,7 +983,7 @@ function ScreenAdminTagsCreate({ onBack }) {
                       <td style={{ padding: '6px 12px', color: 'var(--fg)' }}>{item.id}</td>
                       <td style={{ padding: '6px 12px', color: 'var(--fg)' }}>{item.url}</td>
                       <td style={{ padding: '6px 12px', textAlign: 'right', fontSize: 11, color: 'var(--muted)' }}>
-                        <span style={{ cursor: 'pointer' }} onClick={() => navigator.clipboard?.writeText(item.url)}>copy</span>
+                        <span style={{ cursor: 'pointer' }} onClick={() => navigator.clipboard?.writeText(item.url)}>скопировать</span>
                       </td>
                     </tr>
                   ))}
@@ -1089,6 +1103,8 @@ function ScreenAdminPlayers() {
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [exportingPlayers, setExportingPlayers] = React.useState(false);
   const [globalStats, setGlobalStats] = React.useState(null);
+  // Sort field: 'points' (default) or 'last_seen'
+  const [sortBy, setSortBy] = React.useState('points');
   const perPage = 50;
   const requestIdRef = React.useRef(0);
 
@@ -1102,6 +1118,7 @@ function ScreenAdminPlayers() {
     const reqId = ++requestIdRef.current;
     const params = { page, per_page: perPage };
     if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+    if (sortBy === 'last_seen') params.sort_by = 'last_seen';
     adminApi.getPlayers(params).then(r => {
       if (reqId !== requestIdRef.current) return;
       if (r.ok) {
@@ -1110,7 +1127,7 @@ function ScreenAdminPlayers() {
       }
       setLoading(false);
     });
-  }, [page, debouncedSearch]);
+  }, [page, debouncedSearch, sortBy]);
 
   React.useEffect(() => { loadPlayers(); }, [loadPlayers]);
 
@@ -1173,15 +1190,19 @@ function ScreenAdminPlayers() {
               <input className="input sm" placeholder="ник или UUID" style={{ width: 260 }}
                 value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
             </div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
-              {loading ? 'загрузка…' : 'сорт: баллы ↓'}
-            </div>
+            <span
+              className="mono"
+              style={{ fontSize: 11, color: 'var(--muted)', cursor: 'pointer' }}
+              onClick={() => setSortBy(s => s === 'points' ? 'last_seen' : 'points')}
+            >
+              {loading ? 'загрузка…' : `сорт: ${sortBy === 'points' ? 'баллы ↓' : 'активность ↓'} ⇄`}
+            </span>
           </div>
 
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                {['#', 'ник', 'uuid', 'баллы', 'регистрация', 'сканов', ''].map(h => (
+                {['#', 'ник', 'uuid', 'баллы', 'регистрация', 'сканов', 'последняя активность', ''].map(h => (
                   <th key={h} style={{ padding: '10px 14px', borderBottom: '1px solid var(--line)', fontWeight: 500 }}>{h}</th>
                 ))}
               </tr>
@@ -1206,12 +1227,22 @@ function ScreenAdminPlayers() {
                     {p.registered_at ? new Date(p.registered_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}
                   </td>
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)' }} className="tabular">{p.scan_count ?? 0}</td>
+                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', color: 'var(--fg-2)' }}>
+                    {p.last_seen ? new Date(p.last_seen).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}
+                  </td>
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>
                     <span style={{ marginRight: 12, cursor: 'pointer' }} onClick={() => handleAdjust(p.id, p.nick)}>± баллы</span>
                     <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => handleDelete(p.id, p.nick)}>удал.</span>
                   </td>
                 </tr>
               ))}
+              {!loading && players.length === 0 && (
+                <tr>
+                  <td colSpan={8} style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--muted)' }}>
+                    {debouncedSearch ? 'Участники не найдены по запросу' : 'Участников ещё нет'}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
 
@@ -1312,6 +1343,13 @@ function ScreenAdminLog() {
                   </tr>
                 );
               })}
+              {!loading && log.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--muted)' }}>
+                    Событий ещё нет
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
 

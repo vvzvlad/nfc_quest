@@ -15,6 +15,7 @@ export function getLocalPlayer() {
   }
 }
 
+// Store only player_id and nick — points are always fetched live from scoreboard
 export function setLocalPlayer(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
@@ -23,39 +24,94 @@ export function clearLocalPlayer() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+// ─── Fetch timeout helper ─────────────────────────────────────────────────
+// Creates an AbortController that auto-cancels after timeoutMs milliseconds.
+function withTimeout(timeoutMs) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, clearTimeout: () => clearTimeout(id) };
+}
+
 // ─── HTTP helpers ─────────────────────────────────────────────────────────
 async function post(url, body) {
-  const res = await fetch(BASE + url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  return { ok: res.ok, status: res.status, data };
+  const { signal, clearTimeout: clear } = withTimeout(15000);
+  try {
+    const res = await fetch(BASE + url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body),
+      signal,
+    });
+    clear();
+    try {
+      const data = await res.json();
+      return { ok: res.ok, status: res.status, data };
+    } catch {
+      // Empty or non-JSON body (e.g., HTTP 500 with empty response)
+      return { ok: false, status: res.status, data: {} };
+    }
+  } catch (err) {
+    clear();
+    throw err; // Re-throw so callers can catch (AbortError = timeout, network error, etc.)
+  }
 }
 
 async function get(url) {
-  const res = await fetch(BASE + url, { credentials: 'include' });
-  const data = await res.json();
-  return { ok: res.ok, status: res.status, data };
+  const { signal, clearTimeout: clear } = withTimeout(15000);
+  try {
+    const res = await fetch(BASE + url, { credentials: 'include', signal });
+    clear();
+    try {
+      const data = await res.json();
+      return { ok: res.ok, status: res.status, data };
+    } catch {
+      return { ok: false, status: res.status, data: {} };
+    }
+  } catch (err) {
+    clear();
+    throw err;
+  }
 }
 
 async function del(url) {
-  const res = await fetch(BASE + url, { method: 'DELETE', credentials: 'include' });
-  const data = await res.json();
-  return { ok: res.ok, status: res.status, data };
+  const { signal, clearTimeout: clear } = withTimeout(15000);
+  try {
+    const res = await fetch(BASE + url, { method: 'DELETE', credentials: 'include', signal });
+    clear();
+    try {
+      const data = await res.json();
+      return { ok: res.ok, status: res.status, data };
+    } catch {
+      return { ok: false, status: res.status, data: {} };
+    }
+  } catch (err) {
+    clear();
+    throw err;
+  }
 }
 
 async function put(url, body) {
-  const res = await fetch(BASE + url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  return { ok: res.ok, status: res.status, data };
+  const { signal, clearTimeout: clear } = withTimeout(15000);
+  try {
+    const res = await fetch(BASE + url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body),
+      signal,
+    });
+    clear();
+    try {
+      const data = await res.json();
+      return { ok: res.ok, status: res.status, data };
+    } catch {
+      return { ok: false, status: res.status, data: {} };
+    }
+  } catch (err) {
+    clear();
+    throw err;
+  }
 }
 
 // ─── Game API ──────────────────────────────────────────────────────────────

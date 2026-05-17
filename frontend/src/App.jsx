@@ -1,9 +1,10 @@
 import React from 'react';
-import { Routes, Route, Navigate, useParams, Outlet } from 'react-router-dom';
+import { Routes, Route, useNavigate, useParams, Outlet, Navigate } from 'react-router-dom';
 import { QuestCtx } from './QuestContext.js';
 import { getLocalPlayer, setLocalPlayer, clearLocalPlayer, api, adminApi } from './api.js';
 import { getErrorMessage } from './i18n.js';
 import {
+  QuestHeader,
   ScreenRegistration,
   ScanSuccessPlus, ScanSuccessMinus, ScanLocked, ScanNotYet,
   ScanFinished, ScanFinishedWinner, ScanUnknown, ScanRateLimit,
@@ -76,11 +77,93 @@ function AdminHost({ children }) {
   );
 }
 
+// ─── ScreenLanding ────────────────────────────────────────────────────────────
+
+// Landing screen shown at root `/`. Displayed on hall screens so visitors
+// know to scan an NFC tag to participate.
+function ScreenLanding() {
+  const QUEST = React.useContext(QuestCtx);
+  const navigate = useNavigate();
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+      <QuestHeader simple />
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        padding: '40px 24px', gap: 32,
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontFamily: 'var(--font-mono)', fontSize: 11,
+            color: 'var(--muted)', letterSpacing: '0.15em',
+            textTransform: 'uppercase', marginBottom: 16,
+          }}>nfc · quest</div>
+          <h1 style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 48, lineHeight: 1.0, fontWeight: 800,
+            letterSpacing: '-0.04em', color: 'var(--fg)',
+            margin: '0 0 8px',
+          }}>{QUEST}</h1>
+        </div>
+
+        <div style={{
+          border: '1px solid var(--accent)',
+          padding: '24px 32px',
+          textAlign: 'center',
+          maxWidth: 360,
+        }}>
+          <div style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 22, fontWeight: 700,
+            letterSpacing: '-0.02em', color: 'var(--fg)',
+            lineHeight: 1.3,
+          }}>
+            Сканируйте NFC-метку,<br />
+            <span style={{ color: 'var(--accent)' }}>чтобы начать</span>
+          </div>
+        </div>
+
+        <button
+          className="btn ghost"
+          style={{ maxWidth: 240, width: '100%' }}
+          onClick={() => navigate('/scoreboard')}
+        >
+          Смотреть табло →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── ScreenLoading ────────────────────────────────────────────────────────────
+
+// Shown while a scan API call is in flight (phase === 'scanning' or null).
+function ScreenLoading() {
+  return (
+    <>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+        <QuestHeader simple />
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+          <div style={{
+            width: 32, height: 32,
+            border: '2px solid var(--line)',
+            borderTopColor: 'var(--accent)',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+          }} />
+          <div className="mono" style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: '0.1em' }}>ЗАГРУЗКА…</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── PlayerPage ───────────────────────────────────────────────────────────────
 
 // Possible phases:
 //   'registration' — no local player found, show registration form
-//   'scanning'     — API call in flight, render nothing (blank / loader)
+//   'scanning'     — API call in flight, show loading spinner
 //   'result'       — scan complete, show result screen based on status
 //   'error'        — unexpected API error (network, 5xx, etc.)
 
@@ -96,6 +179,8 @@ function PlayerPage() {
   // On mount: decide whether to show registration or go straight to scanning.
   // If we already scanned this tag in this browser tab, show cached result
   // instead of re-POSTing (prevents accidental re-scans on refresh).
+  // After showing cache, validate that the player still exists in the scoreboard —
+  // if admin deleted the player, invalidate session and go to registration.
   React.useEffect(() => {
     const player = getLocalPlayer();
     if (!player) {
@@ -110,8 +195,19 @@ function PlayerPage() {
         setScanResult(scanData);
         setScoreboardData(boardData);
         setPhase('result');
-        // Refresh scoreboard in background (GET, no side effects)
-        api.scoreboard().then(r => { if (r.ok) setScoreboardData(r.data); });
+        // Validate player is still active and refresh scoreboard in background
+        api.scoreboard().then(r => {
+          if (r.ok) {
+            setScoreboardData(r.data);
+            // If player no longer appears in scoreboard, they were deleted — reset session
+            const stillExists = r.data.players?.some(p => p.nick === player.nick);
+            if (!stillExists) {
+              clearLocalPlayer();
+              sessionStorage.removeItem('scan_result_' + tagId);
+              setPhase('registration');
+            }
+          }
+        });
         return;
       } catch { /* corrupted cache — fall through to fresh scan */ }
     }
@@ -140,11 +236,7 @@ function PlayerPage() {
       const scanData = scanRes.data;
       setScanResult(scanData);
 
-      if (scanData.total != null) {
-        const cur = getLocalPlayer();
-        if (cur) setLocalPlayer({ ...cur, points: scanData.total });
-      }
-
+      // Points are not stored locally; always fetched live from the scoreboard
       const boardRes = await api.scoreboard();
       if (boardRes.ok) {
         setScoreboardData(boardRes.data);
@@ -215,7 +307,8 @@ function PlayerPage() {
         return;
       }
 
-      setLocalPlayer({ player_id, nick, points: data.points ?? 0 });
+      // Store only player_id and nick — points are always fetched live from scoreboard
+      setLocalPlayer({ player_id, nick });
       await doScan(tagId, player_id);
     } catch (err) {
       setRegistrationError('Ошибка регистрации. Попробуйте ещё раз.');
@@ -224,9 +317,9 @@ function PlayerPage() {
 
   // ── Render branch ──────────────────────────────────────────────────────────
 
-  // Still initialising
+  // Still initialising or scanning — show loading spinner
   if (phase === null || phase === 'scanning') {
-    return null; // blank screen while request is in flight
+    return <ScreenLoading />;
   }
 
   if (phase === 'registration') {
@@ -242,7 +335,7 @@ function PlayerPage() {
   if (phase === 'error') {
     // Generic fallback for unexpected errors — pass what we know about the player
     const player = getLocalPlayer();
-    return <ScanUnknown user={player?.nick} score={player?.points} tagId={tagId} />;
+    return <ScanUnknown user={player?.nick} score={0} tagId={tagId} />;
   }
 
   // phase === 'result': pick screen by status + delta
@@ -261,9 +354,10 @@ function PlayerPage() {
       : game?.status === 'not_started' && game?.starts_at
       ? game.starts_at
       : null;
+    // Points are always fetched live from scoreboard; fall back to 0 if not yet available
     const liveScore = myNick && scoreboardData?.players
-      ? scoreboardData.players.find(p => p.nick === myNick)?.points ?? player?.points
-      : player?.points;
+      ? scoreboardData.players.find(p => p.nick === myNick)?.points ?? 0
+      : 0;
     const commonProps = {
       user: myNick, score: liveScore, tagId, boardSlice, timerTarget,
       totalPlayers: scoreboardData?.stats?.total_players,
@@ -334,8 +428,8 @@ export default function App() {
   return (
     <QuestCtx.Provider value={quest}>
       <Routes>
-        {/* Default redirect to scoreboard */}
-        <Route path="/" element={<Navigate to="/scoreboard" replace />} />
+        {/* Landing page shown at root — scan NFC tag to start */}
+        <Route path="/" element={<PhoneHost><ScreenLanding /></PhoneHost>} />
 
         {/* Player flow: tag scan page */}
         <Route path="/tag/:tagId" element={<PhoneHost><PlayerPage /></PhoneHost>} />

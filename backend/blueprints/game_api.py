@@ -3,7 +3,7 @@ import unicodedata
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, current_app
 from models import db, Player, Tag, ScanEvent, GameSettings, TagPlayerScan
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import joinedload
 from strategies import get_strategy
 
@@ -173,60 +173,70 @@ def scan():
         return jsonify({"status": "unknown", "tag_id": tag_id}), 200
 
     # --- Strategy application ---
-    strategy = get_strategy(tag.strategy)
-    if strategy is None:
-        return jsonify({"status": "unknown", "tag_id": tag_id}), 200
-
-    rank_before = _get_rank(player_id, points_override=player.points)
-    points_before = player.points
-
-    delta, result_status = strategy.apply(tag, player_id, db.session)
-
-    if result_status == "locked":
-        # Record the locked scan event
-        event = ScanEvent(tag_id=tag_id, player_id=player_id, delta_points=0, result="locked")
-        db.session.add(event)
-        db.session.commit()
-        return jsonify({"status": "locked", "tag_id": tag_id, "strategy": tag.strategy}), 200
-
-    # --- Award points ---
-    player.points += delta
-    db.session.add(player)
-
-    event = ScanEvent(tag_id=tag_id, player_id=player_id, delta_points=delta, result="ok")
-    db.session.add(event)
+    # Cache strategy name early so it remains available after any session rollback
+    tag_strategy = tag.strategy
     try:
-        db.session.commit()
-    except IntegrityError:
+        strategy = get_strategy(tag_strategy)
+        if strategy is None:
+            return jsonify({"status": "unknown", "tag_id": tag_id}), 200
+
+        rank_before = _get_rank(player_id, points_override=player.points)
+        points_before = player.points
+
+        delta, result_status = strategy.apply(tag, player_id, db.session)
+
+        if result_status == "locked":
+            # Record the locked scan event; if commit fails, still return locked status
+            event = ScanEvent(tag_id=tag_id, player_id=player_id, delta_points=0, result="locked")
+            db.session.add(event)
+            try:
+                db.session.commit()
+            except SQLAlchemyError:
+                db.session.rollback()
+            return jsonify({"status": "locked", "tag_id": tag_id, "strategy": tag_strategy}), 200
+
+        # --- Award points ---
+        player.points += delta
+        db.session.add(player)
+        # Cache final point total before commit — accessing player.points after commit causes
+        # a lazy reload that may fail with ObjectDeletedError if player was concurrently deleted
+        points_after = player.points
+
+        event = ScanEvent(tag_id=tag_id, player_id=player_id, delta_points=delta, result="ok")
+        db.session.add(event)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({"status": "locked", "tag_id": tag_id, "strategy": tag_strategy}), 200
+
+        # Use points_after (cached pre-commit) to compute rank; avoids lazy-load on expired object
+        rank_after = _get_rank(player_id, points_override=points_after)
+
+        # Build strategy_display using cached tag_strategy (safe after any session expiry)
+        sign = "+" if delta >= 0 else ""
+        strategy_display = f"hidden · {tag_strategy} {sign}{delta}"
+
+        meta = f"{points_before} → {points_after}  ·  rank #{rank_before} → #{rank_after}"
+
+        # Broadcast updated scoreboard to all WebSocket clients
+        broadcast_scoreboard()
+
+        return jsonify({
+            "status": "ok",
+            "delta": delta,
+            "total": points_after,
+            "tag_id": tag_id,
+            "strategy": tag_strategy,  # use cached value — safe after any potential rollback
+            "strategy_display": strategy_display,
+            "meta": meta,
+        }), 200
+
+    except SQLAlchemyError as exc:
         db.session.rollback()
-        return jsonify({"status": "locked", "tag_id": tag_id, "strategy": tag.strategy}), 200
-
-    rank_after = _get_rank(player_id, points_override=player.points)
-    points_after = player.points
-
-    # Build strategy_display string
-    sign = "+" if delta >= 0 else ""
-    if tag.strategy == "random":
-        strategy_display = f"hidden · random {sign}{delta}"
-    elif tag.strategy in ("one_time_global", "one_time_per_player"):
-        strategy_display = f"hidden · {tag.strategy} {sign}{delta}"
-    else:
-        strategy_display = f"hidden · {tag.strategy} {sign}{delta}"
-
-    meta = f"{points_before} → {points_after}  ·  rank #{rank_before} → #{rank_after}"
-
-    # Broadcast updated scoreboard to all WebSocket clients
-    broadcast_scoreboard()
-
-    return jsonify({
-        "status": "ok",
-        "delta": delta,
-        "total": points_after,
-        "tag_id": tag_id,
-        "strategy": tag.strategy,
-        "strategy_display": strategy_display,
-        "meta": meta,
-    }), 200
+        # Tag was deleted concurrently or DB error — treat as unknown tag
+        current_app.logger.warning("Scan DB error for tag %s: %s", tag_id, exc)
+        return jsonify({"status": "unknown", "tag_id": tag_id}), 200
 
 
 @game_api.route("/scoreboard", methods=["GET"])

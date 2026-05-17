@@ -129,7 +129,19 @@ function ScreenHallScoreboard() {
                       <span style={{ color: 'var(--muted-2)', padding: '0 0.04em' }}>:</span>
                       <span style={{ color: 'var(--accent)' }}>{timeLeft.slice(6)}</span>
                     </>
-                  : <span style={{ color: 'var(--accent)', fontSize: 100, whiteSpace: 'normal', lineHeight: 0.95 }}>{timeLeft}</span>
+                  : (() => {
+                      // Adaptive font size for award_message or other non-timer text
+                      const msgFontSize = timeLeft.length <= 15 ? 96 : timeLeft.length <= 30 ? 64 : timeLeft.length <= 50 ? 44 : 32;
+                      return (
+                        <span style={{
+                          color: 'var(--accent)',
+                          fontSize: msgFontSize,
+                          whiteSpace: 'normal',
+                          lineHeight: 1.1,
+                          wordBreak: 'break-word',
+                        }}>{timeLeft}</span>
+                      );
+                    })()
                 : <span style={{ color: 'var(--muted-2)' }}>--:--:--</span>
               }
             </div>

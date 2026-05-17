@@ -108,7 +108,7 @@ function ScreenRegistration({ onRegister, error, tagId }) {
           color: 'var(--muted)', fontSize: 14, lineHeight: 1.5,
           margin: '0 0 28px', maxWidth: 280,
         }}>
-          Сканируйте метки по холлу — копите баллы. Свою стартовую можно отсканировать только один раз.
+          Сканируйте метки по холлу — копите баллы. Каждую метку можно отсканировать только один раз.
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -616,7 +616,7 @@ function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerL
       hero={<span style={{ fontSize: 62, letterSpacing: '-0.04em' }}>WAIT</span>}
       sub={getErrorMessage(message, 'Подождите секунду и попробуйте снова.')}
       strategy="rate limit · 1 скан / сек"
-      meta="retry в течение ~ 0.6 сек"
+      meta="повторите попытку через секунду"
       boardSlice={boardSlice}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
