@@ -231,6 +231,9 @@ def adjust_player(player_id):
     except (TypeError, ValueError):
         return jsonify({"error": "INVALID_DELTA"}), 400
 
+    if not (-10000 <= delta_int <= 10000):
+        return jsonify({"error": "DELTA_OUT_OF_RANGE"}), 400
+
     player.points += delta_int
     db.session.commit()
 
@@ -322,7 +325,10 @@ def create_tags_batch():
     data = request.get_json(silent=True) or {}
     strategy = data.get("strategy", "one_time_per_player")
     strategy_params = data.get("strategy_params", {})
-    count = int(data.get("count", 1))
+    try:
+        count = min(int(data.get("count", 1)), 500)
+    except (TypeError, ValueError):
+        return jsonify({"error": "INVALID_COUNT"}), 400
 
     if strategy not in STRATEGIES:
         return jsonify({"error": "UNKNOWN_STRATEGY"}), 400

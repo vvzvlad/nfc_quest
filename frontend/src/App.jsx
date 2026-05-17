@@ -282,7 +282,7 @@ function PlayerPage() {
         ? <ScanSuccessPlus  {...commonScanProps} />
         : <ScanSuccessMinus {...commonScanProps} />;
     }
-    if (status === 'locked')     return <ScanLocked   {...commonProps} />;
+    if (status === 'locked')     return <ScanLocked   {...commonProps} strategy={scanResult.strategy} />;
     if (status === 'not_yet')    return <ScanNotYet   {...commonProps} timerTarget={scanResult.starts_at} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
     if (status === 'finished') {
       // Use rank returned directly by the backend scan response

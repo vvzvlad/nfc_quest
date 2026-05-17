@@ -43,7 +43,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(admin_api, url_prefix="/admin/api")
 
     # Bind socketio to socket_events module and register handlers
-    _socket_events.init_socketio(socketio)
+    _socket_events.init_socketio(socketio, app)
 
     # Create tables and seed initial GameSettings row
     with app.app_context():

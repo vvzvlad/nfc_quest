@@ -665,7 +665,6 @@ function ScreenAdminTags() {
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.unique_players_count ?? 0}</td>
                     <td style={{ padding: '5px 12px' }}><StatusBadge s={t.is_blocked ? 'used' : 'active'} /></td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', textAlign: 'right' }}>
-                      <span style={{ marginRight: 12, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleReset(t.id); }}>сброс</span>
                       <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDelete(t.id); }}>удал.</span>
                     </td>
                   </tr>
@@ -688,16 +687,16 @@ function ScreenAdminTags() {
         <TagDetailPanel
           tag={selectedTag}
           onClose={() => setSelectedTag(null)}
-          onReset={(id) => { handleReset(id); setSelectedTag(null); }}
-          onDelete={(id) => { handleDelete(id); setSelectedTag(null); }}
+          onDelete={async (id) => { await handleDelete(id); }}
           onSaved={(updatedTag) => { setSelectedTag(updatedTag); loadTags(); }}
         />
+
       </div>
     </AdminShell>
   );
 }
 
-function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
+function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
   const [editing, setEditing] = React.useState(false);
   const [editStrategy, setEditStrategy] = React.useState('');
   const [editParams, setEditParams] = React.useState('');
@@ -741,15 +740,11 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
   if (!tag) {
     return (
       <div style={{ borderLeft: '1px solid var(--line)', background: 'var(--bg-2)', padding: 20, display: 'flex', flexDirection: 'column', gap: 18, overflow: 'auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div className="brak" style={{ fontSize: 11 }}>выбрано · —</div>
-          <span className="mono" style={{ fontSize: 10, color: 'var(--muted)' }}>esc</span>
-        </div>
+        <div className="brak" style={{ fontSize: 11 }}>выбрано · —</div>
         <div>
           <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>label</div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginTop: 4, letterSpacing: '-0.02em', color: 'var(--muted)' }}>нажмите на метку</div>
         </div>
-        <div><Sparkline /></div>
       </div>
     );
   }
@@ -768,7 +763,7 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
       {/* header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="brak" style={{ fontSize: 11 }}>[ выбрано · {tag.id} ]</div>
-        <span className="mono" style={{ fontSize: 10, color: 'var(--muted)', cursor: 'pointer' }} onClick={onClose}>esc</span>
+        <span className="mono" style={{ fontSize: 10, color: 'var(--muted)', cursor: 'pointer' }} onClick={onClose}>✕</span>
       </div>
 
       {editing ? (
@@ -821,18 +816,15 @@ function TagDetailPanel({ tag, onClose, onReset, onDelete, onSaved }) {
             ['создана', tag.created_at ? new Date(tag.created_at).toLocaleString('ru-RU') : '—'],
           ]} />
 
-          <div><Sparkline /></div>
-
           {/* actions */}
-          <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-            <button className="btn ghost sm" style={{ flex: 1 }} onClick={() => setEditing(true)}>Редактировать</button>
-            <button className="btn ghost sm" style={{ flex: 1 }} onClick={() => onReset(tag.id)}>Сброс</button>
+          <div style={{ marginTop: 'auto' }}>
+            <button className="btn ghost sm" style={{ width: '100%', marginBottom: 8 }} onClick={() => setEditing(true)}>Редактировать</button>
+            <button
+              className="btn sm"
+              style={{ width: '100%', background: 'transparent', borderColor: 'var(--accent)', color: 'var(--accent)' }}
+              onClick={() => onDelete(tag.id)}
+            >Удалить</button>
           </div>
-          <button
-            className="btn sm"
-            style={{ width: '100%', borderColor: 'var(--accent)', color: 'var(--accent)' }}
-            onClick={() => onDelete(tag.id)}
-          >Удалить</button>
         </>
       )}
     </div>

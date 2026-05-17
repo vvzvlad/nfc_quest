@@ -21,25 +21,27 @@ def _get_secret_key() -> str:
     return key
 
 
-def _get_admin_password() -> str:
-    """Return ADMIN_PASSWORD from env or abort if not set."""
-    password = os.getenv("ADMIN_PASSWORD", "").strip()
-    if not password:
-        print(
-            "ERROR: ADMIN_PASSWORD environment variable is not set.\n"
-            "Set it in .env file or pass via environment before starting the server.",
-            file=sys.stderr,
-        )
+def _get_required_env(name: str) -> str:
+    """Return env var or abort if not set."""
+    value = os.getenv(name, "").strip()
+    if not value:
+        print(f"ERROR: {name} environment variable is not set.", file=sys.stderr)
         sys.exit(1)
-    return password
+    return value
+
+
+def _get_admin_password() -> str:
+    return _get_required_env("ADMIN_PASSWORD")
 
 
 class Config:
     SECRET_KEY = _get_secret_key()
     ADMIN_PASSWORD = _get_admin_password()
-    BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
+    BASE_URL = _get_required_env("BASE_URL")
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", f"sqlite:///{_DEFAULT_DB}")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SESSION_TYPE = "filesystem"
     SESSION_PERMANENT = False
+    SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_SECURE = BASE_URL.startswith("https")
     QUEST_NAME = os.getenv("QUEST_NAME", "ПЕРИМЕТР")

@@ -413,7 +413,7 @@ function CornerBrackets() {
 // State: ok (positive delta)
 function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return <ScanResultLayout
-    user={user || 'r00t_kit'}
+    user={user || ''}
     score={score != null ? score : 310}
     tagId={tagId ? `TAG · ${tagId}` : 'TAG · ???'}
     tone="plus"
@@ -431,7 +431,7 @@ function ScanSuccessPlus({ user, score, tagId, delta, meta, strategyDisplay, boa
 // State: ok (negative delta)
 function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return <ScanResultLayout
-    user={user || 'r00t_kit'}
+    user={user || ''}
     score={score != null ? score : 210}
     tagId={tagId ? `TAG · ${tagId}` : 'TAG · ???'}
     tone="minus"
@@ -447,17 +447,17 @@ function ScanSuccessMinus({ user, score, tagId, delta, meta, strategyDisplay, bo
 }
 
 // State: locked (tag already used)
-function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
+function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers, strategy: tagStrategy }) {
   return (
     <ScanResultLayout
-      user={user || 'r00t_kit'}
+      user={user || ''}
       score={score != null ? score : 310}
       tagId={tagId ? `TAG · ${tagId}` : 'TAG · ???'}
       tone="neutral"
       scanLabel="scan · locked"
       hero={<IconLock />}
       sub="Эта метка уже использована."
-      strategy="oneshot · стартовая"
+      strategy={tagStrategy || 'locked'}
       boardSlice={boardSlice}
       boardTimer={boardTimer || ''}
       boardTimerLabel={boardTimerLabel || 'до конца'}
@@ -472,7 +472,7 @@ function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
 function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, startsAt, totalPlayers }) {
   return (
     <ScanResultLayout
-      user={user || 'r00t_kit'}
+      user={user || ''}
       score={score != null ? score : 0}
       tagId={tagId ? `TAG · ${tagId}` : 'TAG · ???'}
       tone="info"
@@ -523,7 +523,7 @@ function Sep() { return <span style={{ color: 'var(--muted-2)' }}>:</span>; }
 function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, awardMessage, totalPlayers }) {
   return (
     <ScanResultLayout
-      user={user || 'r00t_kit'}
+      user={user || ''}
       score={score != null ? score : 310}
       tagId={tagId ? `TAG · ${tagId}` : 'TAG · ???'}
       tone="neutral"
@@ -585,7 +585,7 @@ function ScanFinishedWinner({ user, score, rank }) {
 function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers }) {
   return (
     <ScanResultLayout
-      user={user || 'r00t_kit'}
+      user={user || ''}
       score={score != null ? score : 310}
       tagId={tagId ? `TAG · ${tagId}` : 'TAG · ????-???'}
       tone="warn"
@@ -608,7 +608,7 @@ function ScanUnknown({ user, score, tagId, boardSlice, boardTimer, boardTimerLab
 function ScanRateLimit({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, totalPlayers, message }) {
   return (
     <ScanResultLayout
-      user={user || 'r00t_kit'}
+      user={user || ''}
       score={score != null ? score : 310}
       tagId={tagId ? `TAG · ${tagId}` : 'TAG · ???'}
       tone="warn"
@@ -691,7 +691,7 @@ function ScreenScoreboardMobile({ initialData }) {
         : gameInfo.status === 'not_started'
         ? new Date(gameInfo.starts_at).getTime()
         : null;
-      if (!target) { setTimeLeft(gameInfo.award_message || ''); return; }
+      if (!target) { setTimeLeft(gameInfo.award_message || 'Квест завершён. Спасибо за участие!'); return; }
       const diff = Math.max(0, target - now);
       const h = Math.floor(diff / 3600000);
       const m = Math.floor((diff % 3600000) / 60000);
@@ -723,11 +723,19 @@ function ScreenScoreboardMobile({ initialData }) {
         </div>
         <div style={{ marginBottom: 16 }}>
           <div className="mono" style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{timerLabel}</div>
-          <div className="tabular" style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 56, lineHeight: 1, fontWeight: 700, letterSpacing: '-0.04em',
-            color: 'var(--fg)',
-          }}>{timeLeft || '—'}</div>
+          {gameInfo?.status === 'finished' ? (
+            <div style={{
+              fontFamily: 'var(--font-sans)',
+              fontSize: 20, lineHeight: 1.3, fontWeight: 600,
+              color: 'var(--fg)', marginTop: 8,
+            }}>{timeLeft || '—'}</div>
+          ) : (
+            <div className="tabular" style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: 56, lineHeight: 1, fontWeight: 700, letterSpacing: '-0.04em',
+              color: 'var(--fg)',
+            }}>{timeLeft || '—'}</div>
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           {scoreboard.map((entry, i) => {

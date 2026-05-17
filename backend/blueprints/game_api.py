@@ -187,7 +187,7 @@ def scan():
         event = ScanEvent(tag_id=tag_id, player_id=player_id, delta_points=0, result="locked")
         db.session.add(event)
         db.session.commit()
-        return jsonify({"status": "locked", "tag_id": tag_id}), 200
+        return jsonify({"status": "locked", "tag_id": tag_id, "strategy": tag.strategy}), 200
 
     # --- Award points ---
     player.points += delta
@@ -199,7 +199,7 @@ def scan():
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        return jsonify({"status": "locked", "tag_id": tag_id}), 200
+        return jsonify({"status": "locked", "tag_id": tag_id, "strategy": tag.strategy}), 200
 
     rank_after = _get_rank(player_id, points_override=player.points)
     points_after = player.points

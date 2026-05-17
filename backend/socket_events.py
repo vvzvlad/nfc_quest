@@ -1,20 +1,57 @@
+import logging
+import time
+import threading
 from datetime import datetime, timezone, timedelta
 from flask_socketio import emit
+
+logger = logging.getLogger(__name__)
 
 # socketio instance is injected from app.py after creation
 socketio = None  # will be set by app.py via init_socketio()
 
+_app = None
+_last_broadcast_status: str | None = None
+_broadcast_thread: threading.Thread | None = None
 
-def init_socketio(sio):
+
+def init_socketio(sio, app=None):
     """Bind the SocketIO instance and register event handlers."""
-    global socketio
+    global socketio, _app
     socketio = sio
+    _app = app
 
     @sio.on("connect")
     def on_connect():
         """Send current scoreboard data to the newly connected client."""
         data = _build_scoreboard_data()
         emit("scoreboard_update", data)
+
+    if app is not None:
+        _start_periodic_broadcast(sio, app)
+
+
+def _start_periodic_broadcast(sio, app):
+    """Broadcast scoreboard every 5s so clients see status transitions (active->finished, not_started->active)."""
+    global _broadcast_thread
+    if _broadcast_thread is not None and _broadcast_thread.is_alive():
+        return
+
+    def _tick():
+        global _last_broadcast_status
+        while True:
+            time.sleep(5)
+            try:
+                with app.app_context():
+                    data = _build_scoreboard_data()
+                    new_status = data.get("game", {}).get("status")
+                    if new_status != _last_broadcast_status:
+                        sio.emit("scoreboard_update", data)
+                        _last_broadcast_status = new_status
+            except Exception as e:
+                logger.exception("Periodic broadcast failed: %s", e)
+
+    _broadcast_thread = threading.Thread(target=_tick, daemon=True)
+    _broadcast_thread.start()
 
 
 def broadcast_scoreboard():
