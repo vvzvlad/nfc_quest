@@ -553,10 +553,10 @@ def get_stats():
 
 
 def _generate_tag_id() -> str:
-    """Generate a TAG ID in format XXXX-XXX using uppercase hex chars."""
+    """Generate a TAG ID in format XXXX-XXXX using uppercase hex chars."""
     chars = string.digits + "ABCDEF"
     part1 = "".join(random.choices(chars, k=4))
-    part2 = "".join(random.choices(chars, k=3))
+    part2 = "".join(random.choices(chars, k=4))
     return f"{part1}-{part2}"
 
 
