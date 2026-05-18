@@ -1,3 +1,4 @@
+import re
 import random
 import string
 from datetime import datetime, timezone, timedelta
@@ -410,12 +411,39 @@ def create_tags_batch():
 @admin_api.route("/tags/<tag_id>", methods=["PUT"])
 @_require_admin
 def update_tag(tag_id):
-    """Update a tag's strategy, params, or label."""
+    """Update a tag's strategy, params, label, or rename its ID."""
     tag = db.session.get(Tag, tag_id)
     if tag is None:
         return jsonify({"error": "TAG_NOT_FOUND"}), 404
 
     data = request.get_json(silent=True) or {}
+
+    # Handle tag_id rename if new_id is provided
+    if "new_id" in data:
+        new_id = data["new_id"].strip().upper()
+        if not re.match(r'^[0-9A-F]{4}-[0-9A-F]{4}$', new_id):
+            return jsonify({"error": "INVALID_TAG_ID_FORMAT"}), 400
+        if new_id != tag_id:
+            if db.session.get(Tag, new_id) is not None:
+                return jsonify({"error": "TAG_ID_ALREADY_EXISTS"}), 409
+            # Create new tag with new ID, preserving all existing fields
+            new_tag = Tag(
+                id=new_id,
+                label=tag.label,
+                strategy=tag.strategy,
+                strategy_params=tag.strategy_params,
+                is_blocked=tag.is_blocked,
+                created_at=tag.created_at,
+            )
+            db.session.add(new_tag)
+            db.session.flush()
+            # Migrate FK references to the new tag_id
+            db.session.query(ScanEvent).filter_by(tag_id=tag_id).update({"tag_id": new_id})
+            db.session.query(TagPlayerScan).filter_by(tag_id=tag_id).update({"tag_id": new_id})
+            db.session.flush()
+            db.session.delete(tag)
+            db.session.flush()
+            tag = new_tag  # continue applying other fields to the new tag
 
     if "strategy" in data:
         tag.strategy = data["strategy"]

@@ -545,6 +545,15 @@ function KV({ k, v }) {
   );
 }
 
+// Strip tag_id suffix from label if present (e.g. "hall · ED7A-B422" → "hall")
+const stripIdSuffix = (label, id) => {
+  if (!label) return '—';
+  if (!id) return label; // guard against undefined/null id from API
+  const suffix = ' · ' + id;
+  if (label.endsWith(suffix)) return label.slice(0, -suffix.length).trim() || '—';
+  return label;
+};
+
 // ─── Screen 6: Tags (dense table view) ─────────────────────────
 function ScreenAdminTags() {
   const navigate = useNavigate();
@@ -646,6 +655,7 @@ function ScreenAdminTags() {
                 {[
                   ['tag_id', 110],
                   ['label', null],
+                  ['url', null],
                   ['стратегия', 100],
                   ['параметры', 90],
                   ['сканов', 70],
@@ -675,7 +685,10 @@ function ScreenAdminTags() {
                     cursor: 'pointer',
                   }}>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg)' }}>{t.id}</td>
-                    <td style={{ padding: '5px 12px', color: 'var(--fg-2)' }}>{t.label || '—'}</td>
+                    <td style={{ padding: '5px 12px', color: 'var(--fg-2)' }}>{stripIdSuffix(t.label, t.id)}</td>
+                    <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-2)' }}>
+                      {`${window.location.origin}/tag/${t.id}`}
+                    </td>
                     <td style={{ padding: '5px 12px' }}><StrategyChip s={t.strategy} /></td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', color: 'var(--fg)' }} className="tabular">{params}</td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)' }} className="tabular">{t.scan_count ?? 0}</td>
@@ -689,7 +702,7 @@ function ScreenAdminTags() {
               })}
               {!loading && tags.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--muted)' }}>
+                  <td colSpan={9} style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--muted)' }}>
                     {debouncedSearch ? 'Метки не найдены по запросу' : 'Метки не созданы. Нажмите «+ массовое создание».'}
                   </td>
                 </tr>
@@ -727,6 +740,8 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
   const [editParams, setEditParams] = React.useState('');
   const [editLabel, setEditLabel] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  const [editTagId, setEditTagId] = React.useState('');
+  const [saveError, setSaveError] = React.useState(null);
 
   // Load available strategies from backend on mount
   React.useEffect(() => {
@@ -743,6 +758,8 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
       setEditing(false);
       setEditStrategy(tag.strategy || '');
       setEditLabel(tag.label || '');
+      setEditTagId(tag.id || '');
+      setSaveError(null);
       const sp = tag.strategy_params || {};
       if ((strategies.find(s => s.name === tag.strategy)?.params_type ?? (tag.strategy === 'random' ? 'range' : 'points')) === 'range') {
         setEditParams(JSON.stringify({ min: sp.min ?? 0, max: sp.max ?? 0 }));
@@ -754,21 +771,36 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveError(null);
     let strategy_params;
     if (isRangeStrategy(editStrategy)) {
       try { strategy_params = JSON.parse(editParams); } catch { strategy_params = { min: 0, max: 0 }; }
     } else {
       strategy_params = { points: parseInt(editParams) || 0 };
     }
-    const res = await adminApi.updateTag(tag.id, {
+    const payload = {
       strategy: editStrategy,
       strategy_params,
       label: editLabel || null,
-    });
+    };
+    // Include new_id only if it has changed
+    if (editTagId && editTagId !== tag.id) {
+      payload.new_id = editTagId;
+    }
+    const res = await adminApi.updateTag(tag.id, payload);
     setSaving(false);
     if (res.ok) {
+      setSaveError(null);
       setEditing(false);
       onSaved(res.data);
+    } else {
+      // Show backend error code to the user
+      const errMap = {
+        'INVALID_TAG_ID_FORMAT': 'Неверный формат tag_id (ожидается XXXX-XXXX, hex)',
+        'TAG_ID_ALREADY_EXISTS': 'Метка с таким tag_id уже существует',
+        'TAG_NOT_FOUND': 'Метка не найдена',
+      };
+      setSaveError(errMap[res.data?.error] || res.data?.error || 'Ошибка сохранения');
     }
   };
 
@@ -805,6 +837,15 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
       {editing ? (
         <>
           {/* edit mode */}
+          <Field label="tag_id" hint="формат: XXXX-XXXX (hex)">
+            <input
+              className="input"
+              value={editTagId}
+              onChange={e => setEditTagId(e.target.value.toUpperCase())}
+              placeholder="XXXX-XXXX"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+          </Field>
           <Field label="label">
             <input className="input" value={editLabel} onChange={e => setEditLabel(e.target.value)} placeholder="название метки" />
           </Field>
@@ -827,6 +868,13 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
           <Field label={isRangeStrategy(editStrategy) ? 'параметры (JSON: {"min": N, "max": M})' : 'баллы'}>
             <input className="input" value={editParams} onChange={e => setEditParams(e.target.value)} />
           </Field>
+
+          {saveError && (
+            <div className="mono" style={{ fontSize: 11, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, background: 'var(--accent)', flexShrink: 0 }} />
+              {saveError}
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn ghost sm" style={{ flex: 1 }} onClick={() => setEditing(false)}>Отмена</button>
