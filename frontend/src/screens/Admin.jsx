@@ -306,19 +306,14 @@ function ScreenAdminGame() {
   const [loading, setLoading] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
 
-  // Load game settings and stats on mount
+  // Load game settings and stats on mount only; updates happen after explicit user actions
   React.useEffect(() => {
     adminApi.getGame().then(r => { if (r.ok) setSettings(r.data); });
     adminApi.getStats().then(r => { if (r.ok) setStats(r.data); });
   }, []);
 
+  // Reload settings from server (called after Save / Start / Stop actions)
   const reloadSettings = () => adminApi.getGame().then(r => { if (r.ok) setSettings(r.data); });
-
-  // Periodically refresh settings so gameStatus-based disabled states stay accurate
-  React.useEffect(() => {
-    const id = setInterval(reloadSettings, 10000);
-    return () => clearInterval(id);
-  }, []);
   const reloadStats = () => adminApi.getStats().then(r => { if (r.ok) setStats(r.data); });
 
   const handleSave = async () => {
@@ -654,7 +649,7 @@ function ScreenAdminTags() {
                 const fmtPts = (v) => { const n = Number(v); return isNaN(n) ? '?' : (n > 0 ? `+${n}` : String(n)); };
                 const params = t.strategy === 'random' ? `${sp.min ?? sp.min_points ?? '?'}…${sp.max ?? sp.max_points ?? '?'}`
                   : t.strategy === 'oneshot' || t.strategy === 'one_time_global' ? fmtPts(sp.points)
-                  : t.strategy === 'one_time_per_player' ? fmtPts(sp.points)
+                  : t.strategy === 'one_time_per_player' || t.strategy === 'bonus_penalty' ? fmtPts(sp.points)
                   : '—';
                 return (
                   <tr key={t.id}
@@ -769,6 +764,7 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
     if (tag.strategy === 'random') return `${sp.min ?? '?'}…${sp.max ?? '?'}`;
     if (tag.strategy === 'oneshot' || tag.strategy === 'one_time_global') return fmtPts(sp.points);
     if (tag.strategy === 'one_time_per_player') return fmtPts(sp.points);
+    if (tag.strategy === 'bonus_penalty') return fmtPts(sp.points);
     return JSON.stringify(sp);
   })();
 
@@ -792,6 +788,7 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
               <option value="one_time_per_player">one_time_per_player</option>
               <option value="random">random</option>
               <option value="oneshot">oneshot</option>
+              <option value="bonus_penalty">bonus_penalty</option>
             </select>
           </Field>
           <Field label={editStrategy === 'random' ? 'параметры (JSON: {"min": N, "max": M})' : 'баллы'}>
@@ -913,6 +910,7 @@ function ScreenAdminTagsCreate({ onBack }) {
               <option value="one_time_per_player">one_time_per_player · раз на игрока</option>
               <option value="random">random · случайные баллы</option>
               <option value="oneshot">oneshot · одноразовая глобально</option>
+              <option value="bonus_penalty">bonus_penalty · бонус/штраф</option>
             </select>
           </Field>
           {strategy === 'random' ? (
@@ -940,7 +938,8 @@ function ScreenAdminTagsCreate({ onBack }) {
             доступные стратегии:<br/>
             · one_time_per_player — раз на игрока (отр. баллы = штраф)<br/>
             · random — диапазон min…max<br/>
-            · oneshot — одноразовая глобально
+            · oneshot — одноразовая глобально<br/>
+            · bonus_penalty — первый скан +N, повторные −90%
           </div>
           <div style={{ flex: 1 }} />
           <button className="btn" style={{ width: '100%' }} onClick={handleCreate} disabled={loading}>
@@ -1023,6 +1022,7 @@ function StrategyChip({ s }) {
     one_time_per_player: { c: 'var(--info)',    l: 'per_player'      },
     random:              { c: 'var(--warn)',    l: 'random'          },
     oneshot:             { c: 'var(--success)', l: 'oneshot'         },
+    bonus_penalty:       { c: 'var(--accent)',  l: 'bonus_penalty'   },
   };
   const m = map[s] || { c: 'var(--muted)', l: String(s || '—') };
   return (
