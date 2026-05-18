@@ -47,7 +47,7 @@ function AdminShell({ section, title, breadcrumb, actions, children, login = fal
     }}>
       <AdminSidebar active={section} />
       <div style={{ display: 'grid', gridTemplateRows: '56px 1fr', overflow: 'hidden' }}>
-        <AdminTopBar breadcrumb={breadcrumb || [title]} actions={actions} />
+        <AdminTopBar breadcrumb={breadcrumb || [{ label: title }]} actions={actions} />
         <div style={{ overflow: 'auto' }}>
           {children}
         </div>
@@ -195,18 +195,37 @@ function AdminSidebar({ active }) {
 }
 
 function AdminTopBar({ breadcrumb, actions }) {
+  const navigate = useNavigate();
+  const [hoveredIdx, setHoveredIdx] = React.useState(null);
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 24px', borderBottom: '1px solid var(--line)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--muted)', letterSpacing: '0.08em' }}>
-        {breadcrumb.map((b, i) => (
-          <React.Fragment key={i}>
-            {i > 0 && <span style={{ color: 'var(--muted-2)' }}>/</span>}
-            <span style={{ color: i === breadcrumb.length - 1 ? 'var(--fg)' : 'var(--muted)', textTransform: 'uppercase' }}>{b}</span>
-          </React.Fragment>
-        ))}
+        {breadcrumb.map((b, i) => {
+          const isLast = i === breadcrumb.length - 1;
+          const isHovered = hoveredIdx === i;
+          // Clickable only for non-last items that have a `to` path; last item is always plain text
+          const clickable = !isLast && !!b.to;
+          return (
+            <React.Fragment key={i}>
+              {i > 0 && <span style={{ color: 'var(--muted-2)' }}>/</span>}
+              <span
+                style={{
+                  color: isLast ? 'var(--fg)' : isHovered ? 'var(--fg)' : 'var(--muted)',
+                  textTransform: 'uppercase',
+                  cursor: clickable ? 'pointer' : 'default',
+                }}
+                onClick={clickable ? () => navigate(b.to) : undefined}
+                onMouseEnter={clickable ? () => setHoveredIdx(i) : undefined}
+                onMouseLeave={clickable ? () => setHoveredIdx(null) : undefined}
+              >
+                {b.label}
+              </span>
+            </React.Fragment>
+          );
+        })}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {actions}
@@ -370,7 +389,7 @@ function ScreenAdminGame() {
   return (
     <AdminShell
       section="game"
-      breadcrumb={['квест', 'Управление игрой']}
+      breadcrumb={[{ label: 'квест', to: '/FRuihf7Y' }, { label: 'Управление игрой' }]}
       actions={<>
         {saved && <span className="mono" style={{ fontSize: 11, color: 'var(--success)' }}>сохранено ✓</span>}
         <button className="btn sm" onClick={handleSave} disabled={loading}>
@@ -588,7 +607,7 @@ function ScreenAdminTags() {
   return (
     <AdminShell
       section="tags"
-      breadcrumb={['квест', 'Метки']}
+      breadcrumb={[{ label: 'квест', to: '/FRuihf7Y' }, { label: 'Метки' }]}
       actions={<>
         <button className="btn ghost sm" disabled={exportingTags} onClick={() => {
           setExportingTags(true);
@@ -913,7 +932,7 @@ function ScreenAdminTagsCreate({ onBack }) {
   return (
     <AdminShell
       section="tags"
-      breadcrumb={['квест', 'Метки', 'Создание']}
+      breadcrumb={[{ label: 'квест', to: '/FRuihf7Y' }, { label: 'Метки', to: '/FRuihf7Y/tags' }, { label: 'Создание' }]}
       actions={<>
         <button className="btn ghost sm" onClick={onBack}>← Назад к таблице</button>
         {!created && <button className="btn sm" onClick={handleCreate} disabled={loading}>{loading ? 'Создаём…' : `+ ещё пачка`}</button>}
@@ -1189,7 +1208,7 @@ function ScreenAdminPlayers() {
   return (
     <AdminShell
       section="players"
-      breadcrumb={['квест', 'Участники']}
+      breadcrumb={[{ label: 'квест', to: '/FRuihf7Y' }, { label: 'Участники' }]}
       actions={<>
         <button className="btn ghost sm" disabled={exportingPlayers} onClick={() => {
           setExportingPlayers(true);
@@ -1327,7 +1346,7 @@ function ScreenAdminLog() {
   return (
     <AdminShell
       section="log"
-      breadcrumb={['квест', 'Лог событий']}
+      breadcrumb={[{ label: 'квест', to: '/FRuihf7Y' }, { label: 'Лог событий' }]}
       actions={<>
         <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
           <span className="live-dot" style={{ marginRight: 8, transform: 'translateY(-1px)' }}/>
