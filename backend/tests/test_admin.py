@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
 from blueprints.game_api import rate_limiter
 
-TAG_ID_PATTERN = re.compile(r'^[0-9A-F]{4}-[0-9A-F]{3}$')
+TAG_ID_PATTERN = re.compile(r'^[0-9A-F]{4}-[0-9A-F]{4}$')
 
 
 class TestAdminAuth:
@@ -322,10 +322,21 @@ class TestAdminTags:
         r = admin_client.get("/admin/api/strategies")
         assert r.status_code == 200
         strategies = r.get_json()["strategies"]
-        assert "one_time_global" in strategies
-        assert "one_time_per_player" in strategies
-        assert "random" in strategies
-        assert "oneshot" in strategies
+        # Each entry is now a dict with metadata fields
+        names = [s["name"] for s in strategies]
+        assert "one_time_global" in names
+        assert "one_time_per_player" in names
+        assert "random" in names
+        assert "bonus_penalty" in names
+        # oneshot is an alias and must NOT appear as a canonical strategy
+        assert "oneshot" not in names
+        # Verify required metadata fields are present in each entry
+        for s in strategies:
+            assert "name" in s
+            assert "label" in s
+            assert "description" in s
+            assert "params_type" in s
+            assert s["params_type"] in ("points", "range")
 
 
 class TestAdminPlayers:

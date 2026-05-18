@@ -88,8 +88,9 @@ def me():
 @admin_api.route("/strategies", methods=["GET"])
 @_require_admin
 def list_strategies():
-    """Return the list of available tag strategy names."""
-    return jsonify({"strategies": sorted(STRATEGIES.keys())}), 200
+    """Return metadata for all available tag strategies."""
+    from strategies import get_strategies_meta
+    return jsonify({"strategies": get_strategies_meta()}), 200
 
 
 # ---------------------------------------------------------------------------

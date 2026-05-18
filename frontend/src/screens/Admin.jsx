@@ -706,11 +706,22 @@ function ScreenAdminTags() {
 }
 
 function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
+  const [strategies, setStrategies] = React.useState([]);
   const [editing, setEditing] = React.useState(false);
   const [editStrategy, setEditStrategy] = React.useState('');
   const [editParams, setEditParams] = React.useState('');
   const [editLabel, setEditLabel] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+
+  // Load available strategies from backend on mount
+  React.useEffect(() => {
+    adminApi.getStrategies().then(r => { if (r.ok) setStrategies(r.data.strategies || []); });
+  }, []);
+
+  // Helper: check if a strategy name uses range params (min/max) instead of single points
+  const isRangeStrategy = (name) =>
+    strategies.find(s => s.name === name)?.params_type === 'range'
+    || (!strategies.length && name === 'random'); // fallback while loading
 
   React.useEffect(() => {
     if (tag) {
@@ -718,7 +729,7 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
       setEditStrategy(tag.strategy || '');
       setEditLabel(tag.label || '');
       const sp = tag.strategy_params || {};
-      if (tag.strategy === 'random') {
+      if ((strategies.find(s => s.name === tag.strategy)?.params_type ?? (tag.strategy === 'random' ? 'range' : 'points')) === 'range') {
         setEditParams(JSON.stringify({ min: sp.min ?? 0, max: sp.max ?? 0 }));
       } else {
         setEditParams(String(sp.points ?? 0));
@@ -729,7 +740,7 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
   const handleSave = async () => {
     setSaving(true);
     let strategy_params;
-    if (editStrategy === 'random') {
+    if (isRangeStrategy(editStrategy)) {
       try { strategy_params = JSON.parse(editParams); } catch { strategy_params = { min: 0, max: 0 }; }
     } else {
       strategy_params = { points: parseInt(editParams) || 0 };
@@ -783,15 +794,22 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
             <input className="input" value={editLabel} onChange={e => setEditLabel(e.target.value)} placeholder="название метки" />
           </Field>
           <Field label="стратегия">
-            <select className="input" value={editStrategy} onChange={e => setEditStrategy(e.target.value)} style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>
-              <option value="one_time_global">one_time_global</option>
-              <option value="one_time_per_player">one_time_per_player</option>
-              <option value="random">random</option>
-              <option value="oneshot">oneshot</option>
-              <option value="bonus_penalty">bonus_penalty</option>
+            <select
+              className="input"
+              value={editStrategy}
+              onChange={e => setEditStrategy(e.target.value)}
+              disabled={strategies.length === 0}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
+            >
+              {strategies.length === 0
+                ? <option value="">loading…</option>
+                : strategies.map(s => (
+                    <option key={s.name} value={s.name}>{s.name}</option>
+                  ))
+              }
             </select>
           </Field>
-          <Field label={editStrategy === 'random' ? 'параметры (JSON: {"min": N, "max": M})' : 'баллы'}>
+          <Field label={isRangeStrategy(editStrategy) ? 'параметры (JSON: {"min": N, "max": M})' : 'баллы'}>
             <input className="input" value={editParams} onChange={e => setEditParams(e.target.value)} />
           </Field>
 
@@ -857,6 +875,7 @@ function KVList({ items }) {
 
 // ─── Screen 6b: Tag batch creation ─────────────────────────────
 function ScreenAdminTagsCreate({ onBack }) {
+  const [strategies, setStrategies] = React.useState([]);
   const [strategy, setStrategy] = React.useState('one_time_per_player');
   const [points, setPoints] = React.useState('50');
   const [minPoints, setMinPoints] = React.useState('0');
@@ -865,9 +884,18 @@ function ScreenAdminTagsCreate({ onBack }) {
   const [created, setCreated] = React.useState(null); // array of {id, url}
   const [loading, setLoading] = React.useState(false);
 
+  // Load available strategies from backend on mount
+  React.useEffect(() => {
+    adminApi.getStrategies().then(r => { if (r.ok) setStrategies(r.data.strategies || []); });
+  }, []);
+
+  // Determine if the currently selected strategy uses range params (min/max)
+  const currentStrategyMeta = strategies.find(s => s.name === strategy);
+  const isRange = currentStrategyMeta?.params_type === 'range';
+
   const handleCreate = async () => {
     setLoading(true);
-    const strategyParams = strategy === 'random'
+    const strategyParams = isRange
       ? { min: parseInt(minPoints) || 0, max: parseInt(points) || 50 }
       : { points: parseInt(points) || 50 };
     const res = await adminApi.createTagsBatch({
@@ -905,15 +933,18 @@ function ScreenAdminTagsCreate({ onBack }) {
               className="input"
               value={strategy}
               onChange={e => setStrategy(e.target.value)}
+              disabled={strategies.length === 0}
               style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
             >
-              <option value="one_time_per_player">one_time_per_player · раз на игрока</option>
-              <option value="random">random · случайные баллы</option>
-              <option value="oneshot">oneshot · одноразовая глобально</option>
-              <option value="bonus_penalty">bonus_penalty · бонус/штраф</option>
+              {strategies.length === 0
+                ? <option value="">loading…</option>
+                : strategies.map(s => (
+                    <option key={s.name} value={s.name}>{s.name} · {s.description}</option>
+                  ))
+              }
             </select>
           </Field>
-          {strategy === 'random' ? (
+          {isRange ? (
             <>
               <Field label="мин. баллы">
                 <input className="input tabular" value={minPoints} onChange={e => setMinPoints(e.target.value)} />
@@ -935,11 +966,10 @@ function ScreenAdminTagsCreate({ onBack }) {
           </Field>
           <div className="hr" />
           <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
-            доступные стратегии:<br/>
-            · one_time_per_player — раз на игрока (отр. баллы = штраф)<br/>
-            · random — диапазон min…max<br/>
-            · oneshot — одноразовая глобально<br/>
-            · bonus_penalty — первый скан +N, повторные −90%
+            available strategies:<br/>
+            {strategies.map(s => (
+              <React.Fragment key={s.name}>· {s.name} — {s.description}<br/></React.Fragment>
+            ))}
           </div>
           <div style={{ flex: 1 }} />
           <button className="btn" style={{ width: '100%' }} onClick={handleCreate} disabled={loading}>

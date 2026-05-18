@@ -7,7 +7,10 @@ from sqlalchemy import update
 class ScoringStrategy(ABC):
     """Base class for all tag scoring strategies."""
 
-    name: str  # Unique identifier used in Tag.strategy field
+    name: str        # Unique identifier used in Tag.strategy field
+    label: str       # Short UI display name
+    description: str # Human-readable description of strategy behaviour
+    params_type: str # Parameter schema: "points" (single int) or "range" (min + max)
 
     @abstractmethod
     def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
@@ -29,6 +32,9 @@ class OneTimeGlobalStrategy(ScoringStrategy):
     """
 
     name = "one_time_global"
+    label = "one_time_global"
+    description = "one scan by anyone — first scan blocks the tag globally"
+    params_type = "points"
 
     def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
         from models import Tag
@@ -51,6 +57,9 @@ class OneTimePerPlayerStrategy(ScoringStrategy):
     """
 
     name = "one_time_per_player"
+    label = "per_player"
+    description = "one scan per player — each player can scan once"
+    params_type = "points"
 
     def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
         from models import TagPlayerScan  # local import to avoid circular deps
@@ -72,6 +81,9 @@ class RandomStrategy(ScoringStrategy):
     """
 
     name = "random"
+    label = "random"
+    description = "random points in range min…max"
+    params_type = "range"
 
     def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
         params = tag.strategy_params or {}
@@ -92,6 +104,9 @@ class BonusPenaltyStrategy(ScoringStrategy):
     """
 
     name = "bonus_penalty"
+    label = "bonus_penalty"
+    description = "first scan awards +N points, repeated scans deduct 90%"
+    params_type = "points"
 
     def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
         from models import TagPlayerScan  # local import to avoid circular deps
@@ -124,6 +139,23 @@ STRATEGIES: dict[str, ScoringStrategy] = {
 
 # Aliases for UI compatibility
 STRATEGIES["oneshot"] = STRATEGIES["one_time_global"]
+
+
+def get_strategies_meta() -> list[dict]:
+    """Return metadata for all canonical (non-alias) strategies in registration order."""
+    seen = set()
+    result = []
+    for name, strat in STRATEGIES.items():
+        if strat.name in seen:
+            continue  # skip aliases
+        seen.add(strat.name)
+        result.append({
+            "name": strat.name,
+            "label": strat.label,
+            "description": strat.description,
+            "params_type": strat.params_type,
+        })
+    return result
 
 
 def get_strategy(name: str) -> ScoringStrategy | None:
