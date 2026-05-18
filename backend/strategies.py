@@ -83,6 +83,33 @@ class RandomStrategy(ScoringStrategy):
         return points, "ok"
 
 
+class BonusPenaltyStrategy(ScoringStrategy):
+    """
+    First scan by a player awards points.
+    Subsequent scans by the same player deduct 90% of the original award.
+    Uses TagPlayerScan to track first-scan state per player.
+    strategy_params: {"points": N}
+    """
+
+    name = "bonus_penalty"
+
+    def apply(self, tag, player_id: str, db_session) -> tuple[int, str]:
+        from models import TagPlayerScan  # local import to avoid circular deps
+
+        points = int((tag.strategy_params or {}).get("points", 0))
+        existing = db_session.get(TagPlayerScan, (tag.id, player_id))
+
+        if existing is None:
+            # First scan: award points and record the scan
+            record = TagPlayerScan(tag_id=tag.id, player_id=player_id)
+            db_session.add(record)
+            return points, "ok"
+
+        # Subsequent scan: deduct 90% of the original award
+        penalty = round(0.9 * points)
+        return -penalty, "ok"
+
+
 # Registry: strategy name -> strategy instance
 # To add a new strategy: create a subclass and add it here.
 STRATEGIES: dict[str, ScoringStrategy] = {
@@ -91,6 +118,7 @@ STRATEGIES: dict[str, ScoringStrategy] = {
         OneTimeGlobalStrategy(),
         OneTimePerPlayerStrategy(),
         RandomStrategy(),
+        BonusPenaltyStrategy(),
     ]
 }
 

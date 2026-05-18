@@ -388,3 +388,126 @@ class TestRateLimit:
         assert body.get("status") == "rate_limit"
         assert isinstance(body.get("message"), str)
         assert len(body["message"]) > 0
+
+
+class TestBonusPenaltyStrategy:
+    # BP-1: First scan awards full points and status is "ok"
+    def test_bonus_penalty_first_scan_awards_points(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "bonus_penalty", {"points": 50})
+        tag_id = tags[0]["id"]
+        register_player(client, make_player_id("player-bp1"), "PlayerBP1")
+
+        r = scan_tag(client, make_player_id("player-bp1"), tag_id)
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["status"] == "ok"
+        assert body["delta"] == 50
+        assert body["total"] == 50
+
+    # BP-2: Second scan by the same player deducts 90% of points and status is "ok"
+    def test_bonus_penalty_second_scan_deducts(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "bonus_penalty", {"points": 50})
+        tag_id = tags[0]["id"]
+        register_player(client, make_player_id("player-bp2"), "PlayerBP2")
+
+        # First scan: award points
+        r1 = scan_tag(client, make_player_id("player-bp2"), tag_id)
+        assert r1.get_json()["status"] == "ok"
+        assert r1.get_json()["delta"] == 50
+
+        # Second scan: deduct penalty = round(0.9 * 50) = 45
+        rate_limiter.clear()
+        r2 = scan_tag(client, make_player_id("player-bp2"), tag_id)
+        assert r2.status_code == 200
+        body2 = r2.get_json()
+        assert body2["status"] == "ok"
+        assert body2["delta"] == -45
+        assert body2["total"] == 5  # 50 - 45 = 5
+
+    # BP-3: Third scan deducts the same penalty again (not compounding)
+    def test_bonus_penalty_third_scan_deducts_again(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "bonus_penalty", {"points": 50})
+        tag_id = tags[0]["id"]
+        register_player(client, make_player_id("player-bp3"), "PlayerBP3")
+
+        # First scan: +50
+        r1 = scan_tag(client, make_player_id("player-bp3"), tag_id)
+        assert r1.get_json()["delta"] == 50
+
+        # Second scan: -45 → total = 5
+        rate_limiter.clear()
+        r2 = scan_tag(client, make_player_id("player-bp3"), tag_id)
+        assert r2.get_json()["delta"] == -45
+
+        # Third scan: -45 again (same fixed penalty, not compounding) → total = -40
+        rate_limiter.clear()
+        r3 = scan_tag(client, make_player_id("player-bp3"), tag_id)
+        body3 = r3.get_json()
+        assert body3["status"] == "ok"
+        assert body3["delta"] == -45
+        assert body3["total"] == -40  # 50 - 45 - 45 = -40
+
+    # BP-4: Player B's first scan still awards full points after Player A has been penalized
+    def test_bonus_penalty_independent_per_player(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "bonus_penalty", {"points": 100})
+        tag_id = tags[0]["id"]
+        register_player(client, make_player_id("player-bp4a"), "PlayerBP4A")
+        register_player(client, make_player_id("player-bp4b"), "PlayerBP4B")
+
+        # Player A: first scan (+100)
+        r_a1 = scan_tag(client, make_player_id("player-bp4a"), tag_id)
+        assert r_a1.get_json()["delta"] == 100
+
+        # Player A: second scan (penalty, -90)
+        rate_limiter.clear()
+        r_a2 = scan_tag(client, make_player_id("player-bp4a"), tag_id)
+        assert r_a2.get_json()["delta"] == -90
+
+        # Player B: first scan — must still award full points, unaffected by Player A
+        rate_limiter.clear()
+        r_b1 = scan_tag(client, make_player_id("player-bp4b"), tag_id)
+        body_b1 = r_b1.get_json()
+        assert body_b1["status"] == "ok"
+        assert body_b1["delta"] == 100
+        assert body_b1["total"] == 100
+
+    # BP-5: points=0 — first scan delta=0, second scan delta=0, no crash
+    def test_bonus_penalty_zero_points(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "bonus_penalty", {"points": 0})
+        tag_id = tags[0]["id"]
+        register_player(client, make_player_id("player-bp5"), "PlayerBP5")
+
+        r1 = scan_tag(client, make_player_id("player-bp5"), tag_id)
+        body1 = r1.get_json()
+        assert body1["status"] == "ok"
+        assert body1["delta"] == 0
+
+        rate_limiter.clear()
+        r2 = scan_tag(client, make_player_id("player-bp5"), tag_id)
+        body2 = r2.get_json()
+        assert body2["status"] == "ok"
+        assert body2["delta"] == 0  # round(0.9 * 0) = 0
+        assert body2["total"] == 0
+
+    # BP-6: points=11 — first scan delta=11, second scan delta=-10 (round(0.9*11)=round(9.9)=10)
+    def test_bonus_penalty_rounding(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "bonus_penalty", {"points": 11})
+        tag_id = tags[0]["id"]
+        register_player(client, make_player_id("player-bp6"), "PlayerBP6")
+
+        r1 = scan_tag(client, make_player_id("player-bp6"), tag_id)
+        body1 = r1.get_json()
+        assert body1["status"] == "ok"
+        assert body1["delta"] == 11
+
+        rate_limiter.clear()
+        r2 = scan_tag(client, make_player_id("player-bp6"), tag_id)
+        body2 = r2.get_json()
+        assert body2["status"] == "ok"
+        assert body2["delta"] == -10  # round(0.9 * 11) = round(9.9) = 10
