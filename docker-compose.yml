@@ -19,12 +19,12 @@ services:
         max-size: 10m
     labels:
       traefik.enable: true
-      traefik.http.routers.glaze_resolver.rule: Host(`хххх`)
-      traefik.http.services.glaze_resolver.loadBalancer.server.port: 5000
-      traefik.http.routers.glaze_resolver.entrypoints: websecure
-      traefik.http.routers.glaze_resolver.tls.certresolver: letsEncrypt
-      traefik.http.routers.glaze_resolver.tls: true
-      traefik.http.routers.glaze_resolver.priority: 100
+      traefik.http.routers.nfc_quest.rule: Host(`хххх`)
+      traefik.http.services.nfc_quest.loadBalancer.server.port: 5000
+      traefik.http.routers.nfc_quest.entrypoints: websecure
+      traefik.http.routers.nfc_quest.tls.certresolver: letsEncrypt
+      traefik.http.routers.nfc_quest.tls: true
+      traefik.http.routers.nfc_quest.priority: 100
 
       com.centurylinklabs.watchtower.enable: true
 
