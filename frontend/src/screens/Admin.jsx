@@ -1040,7 +1040,7 @@ function StatusBadge({ s }) {
     disabled: { c: 'var(--muted-2)', l: '× off' },
   };
   const m = map[s] || { c: 'var(--muted)', l: s || '—' };
-  return <span className="mono" style={{ fontSize: 11, color: m.c, letterSpacing: '0.06em' }}>{m.l}</span>;
+  return <span className="mono" style={{ fontSize: 11, color: m.c, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{m.l}</span>;
 }
 
 function FilterChip({ label }) {
