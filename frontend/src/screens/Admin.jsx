@@ -153,7 +153,7 @@ function AdminSidebar({ active }) {
 
       {sections.map(s => (
         <div key={s.id}
-          onClick={() => navigate(`/admin/${s.id}`)}
+          onClick={() => navigate(`/FRuihf7Y/${s.id}`)}
           style={{
           display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8,
           padding: '7px 8px',
@@ -187,7 +187,7 @@ function AdminSidebar({ active }) {
         </div>
         <div className="mono" style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
           <span>admin</span>
-          <span onClick={() => adminApi.logout().then(() => { window.location.href = '/admin/login'; })} style={{ cursor: 'pointer' }}>выход</span>
+          <span onClick={() => adminApi.logout().then(() => { window.location.href = '/FRuihf7Y/login'; })} style={{ cursor: 'pointer' }}>выход</span>
         </div>
       </div>
     </div>
@@ -228,7 +228,7 @@ function ScreenAdminLogin() {
     setError(null);
     const res = await adminApi.login(password);
     if (res.ok) {
-      navigate('/admin');
+      navigate('/FRuihf7Y');
     } else {
       setError(getErrorMessage(res.data?.error, 'Неверный пароль'));
     }

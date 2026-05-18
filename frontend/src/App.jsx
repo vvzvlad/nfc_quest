@@ -396,7 +396,7 @@ function PlayerPage() {
 // ─── RequireAuth ──────────────────────────────────────────────────────────────
 
 // RequireAuth: checks session validity before rendering admin content.
-// Renders null while the check is in-flight, redirects to /admin/login if not authenticated.
+// Renders null while the check is in-flight, redirects to /FRuihf7Y/login if not authenticated.
 function RequireAuth() {
   const [authChecked, setAuthChecked] = React.useState(false);
   const [authenticated, setAuthenticated] = React.useState(false);
@@ -411,7 +411,7 @@ function RequireAuth() {
   }, []);
 
   if (!authChecked) return null; // blank while checking
-  if (!authenticated) return <Navigate to="/admin/login" replace />;
+  if (!authenticated) return <Navigate to="/FRuihf7Y/login" replace />;
   return <Outlet />; // renders the matched child route
 }
 
@@ -441,13 +441,14 @@ export default function App() {
         <Route path="/hall" element={<ScaleHost width={1920} height={1080}><ScreenHallScoreboard /></ScaleHost>} />
 
         {/* Admin screens — full viewport, no fixed canvas */}
-        <Route path="/admin/login" element={<AdminHost><ScreenAdminLogin /></AdminHost>} />
+        <Route path="/FRuihf7Y/login" element={<AdminHost><ScreenAdminLogin /></AdminHost>} />
+        <Route path="/admin" element={<Navigate to="/tag/admin" replace />} />
         <Route element={<AdminHost><RequireAuth /></AdminHost>}>
-          <Route path="/admin"         element={<ScreenAdminGame />} />
-          <Route path="/admin/game"    element={<ScreenAdminGame />} />
-          <Route path="/admin/tags"    element={<ScreenAdminTags />} />
-          <Route path="/admin/players" element={<ScreenAdminPlayers />} />
-          <Route path="/admin/log"     element={<ScreenAdminLog />} />
+          <Route path="/FRuihf7Y"         element={<ScreenAdminGame />} />
+          <Route path="/FRuihf7Y/game"    element={<ScreenAdminGame />} />
+          <Route path="/FRuihf7Y/tags"    element={<ScreenAdminTags />} />
+          <Route path="/FRuihf7Y/players" element={<ScreenAdminPlayers />} />
+          <Route path="/FRuihf7Y/log"     element={<ScreenAdminLog />} />
         </Route>
       </Routes>
     </QuestCtx.Provider>
