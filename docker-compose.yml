@@ -27,3 +27,10 @@ services:
       traefik.http.routers.glaze_resolver.priority: 100
 
       com.centurylinklabs.watchtower.enable: true
+
+volumes:
+  nfc_quest:
+
+networks:
+  docker_main_net:
+    external: true
