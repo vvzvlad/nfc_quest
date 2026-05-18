@@ -95,6 +95,47 @@ make run            # запуск сервера на :5000
 docker compose up --build
 ```
 
+## Тесты
+
+Тесты покрывают бэкенд (Python/Flask). Фреймворк — **pytest** + **pytest-flask**. Каждый тест поднимает свежее приложение с временной SQLite-базой в памяти, поэтому тесты изолированы и не требуют внешних зависимостей.
+
+### Как запустить тесты
+
+```bash
+cd backend
+pip install -r requirements.txt -r requirements-test.txt
+pytest
+```
+
+Для краткого вывода (как в CI):
+
+```bash
+pytest --tb=short -q
+```
+
+### Что покрыто
+
+| Файл | Область |
+|------|---------|
+| `test_register.py` | Регистрация игроков |
+| `test_scan_strategies.py` | Стратегии начисления баллов (`one_time_global`, `one_time_per_player`, `random` и др.) |
+| `test_scan_game_status.py` | Сканирование в разных состояниях игры (не начата / завершена / пауза) |
+| `test_scan_log.py` | Лог сканирований |
+| `test_scoreboard.py` | Формирование и порядок табло |
+| `test_admin.py` | Аутентификация и операции админки |
+| `test_player_management.py` | Управление игроками (удаление, влияние на табло) |
+| `test_game_lifecycle.py` | Жизненный цикл игры (старт / стоп / сброс) |
+| `test_websocket.py` | WebSocket-подключение и начальное состояние |
+| `test_websocket_gaps.py` | WebSocket-броадкасты при изменениях игры |
+| `test_concurrency.py` | Гонки при одновременном сканировании `one_time_global` |
+| `test_security.py` | XSS-инъекции через никнейм и прочие входные данные |
+| `test_e2e_flows.py` | Полный путь игрока: регистрация → сканирование → табло |
+| `test_user_walkthroughs.py` | Пользовательские сценарии (rate limiter, повторные сканы) |
+
+### CI
+
+Тесты автоматически запускаются в GitHub Actions на каждый push и PR в `main` (job `test` в воркфлоу `ghcr-check-publish.yml`). Сборка Docker-образа происходит только после успешного прогона тестов.
+
 ## Лицензия
 
 MIT
