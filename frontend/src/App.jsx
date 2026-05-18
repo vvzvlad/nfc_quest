@@ -13,7 +13,7 @@ import {
 import { ScreenHallScoreboard } from './screens/Hall.jsx';
 import {
   ScreenAdminLogin, ScreenAdminGame, ScreenAdminTags,
-  ScreenAdminPlayers, ScreenAdminLog,
+  ScreenAdminTagsCreate, ScreenAdminPlayers, ScreenAdminLog,
 } from './screens/Admin.jsx';
 
 // generateUUID must come AFTER all imports (ESM rule: imports must be at top of file)
@@ -446,8 +446,9 @@ export default function App() {
         <Route element={<AdminHost><RequireAuth /></AdminHost>}>
           <Route path="/FRuihf7Y"         element={<ScreenAdminGame />} />
           <Route path="/FRuihf7Y/game"    element={<ScreenAdminGame />} />
-          <Route path="/FRuihf7Y/tags"    element={<ScreenAdminTags />} />
-          <Route path="/FRuihf7Y/players" element={<ScreenAdminPlayers />} />
+          <Route path="/FRuihf7Y/tags"        element={<ScreenAdminTags />} />
+          <Route path="/FRuihf7Y/tags/create" element={<ScreenAdminTagsCreate />} />
+          <Route path="/FRuihf7Y/players"     element={<ScreenAdminPlayers />} />
           <Route path="/FRuihf7Y/log"     element={<ScreenAdminLog />} />
         </Route>
       </Routes>

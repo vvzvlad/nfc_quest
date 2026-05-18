@@ -547,13 +547,13 @@ function KV({ k, v }) {
 
 // ─── Screen 6: Tags (dense table view) ─────────────────────────
 function ScreenAdminTags() {
+  const navigate = useNavigate();
   const [tags, setTags] = React.useState([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
-  const [showCreate, setShowCreate] = React.useState(false);
   const [selectedTag, setSelectedTag] = React.useState(null);
   const [exportingTags, setExportingTags] = React.useState(false);
   const perPage = 50;
@@ -600,10 +600,6 @@ function ScreenAdminTags() {
     loadTags();
   };
 
-  if (showCreate) {
-    return <ScreenAdminTagsCreate onBack={() => { setShowCreate(false); loadTags(); }} />;
-  }
-
   return (
     <AdminShell
       section="tags"
@@ -625,7 +621,7 @@ function ScreenAdminTags() {
             }
           }).finally(() => setExportingTags(false)); // reset flag even on network error
         }}>{exportingTags ? 'Экспорт…' : 'Экспорт CSV'}</button>
-        <button className="btn sm" onClick={() => setShowCreate(true)}>+ создать пачку</button>
+        <button className="btn sm" onClick={() => navigate('/FRuihf7Y/tags/create')}>+ массовое создание</button>
       </>}
     >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', height: '100%' }}>
@@ -694,7 +690,7 @@ function ScreenAdminTags() {
               {!loading && tags.length === 0 && (
                 <tr>
                   <td colSpan={8} style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--muted)' }}>
-                    {debouncedSearch ? 'Метки не найдены по запросу' : 'Метки не созданы. Нажмите «+ создать пачку».'}
+                    {debouncedSearch ? 'Метки не найдены по запросу' : 'Метки не созданы. Нажмите «+ массовое создание».'}
                   </td>
                 </tr>
               )}
@@ -893,7 +889,8 @@ function KVList({ items }) {
 }
 
 // ─── Screen 6b: Tag batch creation ─────────────────────────────
-function ScreenAdminTagsCreate({ onBack }) {
+function ScreenAdminTagsCreate() {
+  const navigate = useNavigate();
   const [strategies, setStrategies] = React.useState([]);
   const [strategy, setStrategy] = React.useState('one_time_per_player');
   const [points, setPoints] = React.useState('50');
@@ -934,15 +931,15 @@ function ScreenAdminTagsCreate({ onBack }) {
       section="tags"
       breadcrumb={[{ label: 'квест', to: '/FRuihf7Y' }, { label: 'Метки', to: '/FRuihf7Y/tags' }, { label: 'Создание' }]}
       actions={<>
-        <button className="btn ghost sm" onClick={onBack}>← Назад к таблице</button>
-        {!created && <button className="btn sm" onClick={handleCreate} disabled={loading}>{loading ? 'Создаём…' : `+ ещё пачка`}</button>}
+        <button className="btn ghost sm" onClick={() => navigate('/FRuihf7Y/tags')}>← Назад к таблице</button>
+        {!created && <button className="btn sm" onClick={handleCreate} disabled={loading}>{loading ? 'Создаём…' : '+ создать'}</button>}
       </>}
     >
       <div style={{ display: 'grid', gridTemplateColumns: '420px 1fr', height: '100%' }}>
         {/* left — form */}
         <div style={{ borderRight: '1px solid var(--line)', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, overflow: 'auto' }}>
           <div>
-            <div className="brak" style={{ fontSize: 11 }}>новая пачка</div>
+            <div className="brak" style={{ fontSize: 11 }}>массовое создание</div>
             <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', margin: '8px 0 4px' }}>Создать метки</h2>
             <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0, maxWidth: 360 }}>Сгенерируйте URL и запишите их на NFC через любое приложение для записи (например NFC Tools).</p>
           </div>
@@ -1418,6 +1415,6 @@ function ScreenAdminLog() {
 
 export {
   AdminShell, AdminSidebar, AdminTopBar, SectionBlock, Field, DateTimeField, DangerBtn, KV,
-  ScreenAdminLogin, ScreenAdminGame, ScreenAdminTags, ScreenAdminPlayers, ScreenAdminLog,
+  ScreenAdminLogin, ScreenAdminGame, ScreenAdminTags, ScreenAdminTagsCreate, ScreenAdminPlayers, ScreenAdminLog,
   StrategyChip, StatusBadge, FilterChip, FakeQR, SelectFake, Sparkline,
 };
