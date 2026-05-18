@@ -1,13 +1,29 @@
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "5000:5000"
+  nfc_quest:
+    image: ghcr.io/vvzvlad/nfc_quest:latest
+    container_name: nfc_quest
     volumes:
-      - ./data:/app/data
-    env_file:
-      - .env
+      - nfc_quest:/app/data
     environment:
-      - DATABASE_URL=sqlite:///data/quest.db
+      TZ: Europe/Moscow
+      ADMIN_PASSWORD: хххх
+      BASE_URL: https://nfc......cc
+      QUEST_NAME: хххх
+    restart: always
+    networks:
+      - docker_main_net
+    logging:
+      driver: "json-file"
+      options:
+        max-file: 5
+        max-size: 10m
+    labels:
+      traefik.enable: true
+      traefik.http.routers.glaze_resolver.rule: Host(`хххх`)
+      traefik.http.services.glaze_resolver.loadBalancer.server.port: 5000
+      traefik.http.routers.glaze_resolver.entrypoints: websecure
+      traefik.http.routers.glaze_resolver.tls.certresolver: letsEncrypt
+      traefik.http.routers.glaze_resolver.tls: true
+      traefik.http.routers.glaze_resolver.priority: 100
+
+      com.centurylinklabs.watchtower.enable: true

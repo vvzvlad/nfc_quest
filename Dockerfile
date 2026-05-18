@@ -26,5 +26,8 @@ RUN mkdir -p /app/data
 
 EXPOSE 5000
 
-# Use eventlet worker for WebSocket support via gunicorn
-CMD ["python", "-m", "gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5000", "run:application"]
+# Tell Flask-SocketIO to use gevent async mode (required for gunicorn gevent worker)
+ENV SOCKETIO_ASYNC_MODE=gevent
+
+# Use gevent worker for WebSocket support via gunicorn
+CMD ["python", "-m", "gunicorn", "--worker-class", "geventwebsocket.gunicorn.workers.GeventWebSocketWorker", "-w", "1", "--bind", "0.0.0.0:5000", "run:application"]
