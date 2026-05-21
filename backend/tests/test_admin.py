@@ -976,3 +976,187 @@ class TestAdminScanLogExtra:
         assert r_p3.status_code == 200
         body_p3 = r_p3.get_json()
         assert len(body_p3["items"]) == 1
+
+
+class TestAdminBulkTagOps:
+    # BK-1: bulk_update changes strategy and strategy_params for all listed tags
+    def test_bulk_update_changes_strategy_and_params(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 1, "max": 1}, count=3)
+        ids = [t["id"] for t in tags]
+
+        r = admin_client.post(
+            "/admin/api/tags/bulk_update",
+            json={"ids": ids, "strategy": "one_time_per_player", "strategy_params": {"points": 99}},
+        )
+        assert r.status_code == 200
+        assert r.get_json()["updated"] == 3
+
+        # Verify all three tags now have the updated strategy and params
+        r_list = admin_client.get("/admin/api/tags")
+        items = r_list.get_json()["items"]
+        updated_tags = [t for t in items if t["id"] in ids]
+        assert len(updated_tags) == 3
+        for tag in updated_tags:
+            assert tag["strategy"] == "one_time_per_player"
+            assert tag["strategy_params"]["points"] == 99
+
+    # BK-2: bulk_update silently skips nonexistent IDs and returns the correct updated count
+    def test_bulk_update_skips_nonexistent_ids(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 1, "max": 1}, count=2)
+        ids = [t["id"] for t in tags]
+        ids_with_ghost = ids + ["ZZZZ-ZZZZ"]
+
+        r = admin_client.post(
+            "/admin/api/tags/bulk_update",
+            json={"ids": ids_with_ghost, "strategy": "one_time_per_player", "strategy_params": {"points": 10}},
+        )
+        assert r.status_code == 200
+        # Only 2 real tags updated; nonexistent ID silently skipped
+        assert r.get_json()["updated"] == 2
+
+    # BK-3: bulk_update returns 400 with INVALID_IDS when ids list is empty
+    def test_bulk_update_returns_400_for_empty_ids(self, admin_client):
+        r = admin_client.post(
+            "/admin/api/tags/bulk_update",
+            json={"ids": [], "strategy": "random", "strategy_params": {"min": 1, "max": 2}},
+        )
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "INVALID_IDS"
+
+    # BK-4: bulk_update returns 400 with UNKNOWN_STRATEGY for an unrecognised strategy name
+    def test_bulk_update_returns_400_for_unknown_strategy(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 1, "max": 1}, count=1)
+        tag_id = tags[0]["id"]
+
+        r = admin_client.post(
+            "/admin/api/tags/bulk_update",
+            json={"ids": [tag_id], "strategy": "nonexistent_strategy"},
+        )
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "UNKNOWN_STRATEGY"
+
+    # BK-5: bulk_update returns 400 with INVALID_STRATEGY_PARAMS when strategy_params is a string
+    def test_bulk_update_returns_400_for_invalid_strategy_params(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 1, "max": 1}, count=1)
+        tag_id = tags[0]["id"]
+
+        r = admin_client.post(
+            "/admin/api/tags/bulk_update",
+            json={"ids": [tag_id], "strategy_params": "50"},
+        )
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "INVALID_STRATEGY_PARAMS"
+
+    # BK-6: bulk_update affects the points awarded on the next scan
+    def test_bulk_update_affects_scan_outcome(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "random", {"min": 5, "max": 5}, count=1)
+        tag_id = tags[0]["id"]
+        player_id = make_player_id("player-bk6")
+        register_player(client, player_id, "PlayerBK6")
+
+        # First scan earns 5 points (original params)
+        rate_limiter.clear()
+        r1 = scan_tag(client, player_id, tag_id)
+        assert r1.get_json()["delta"] == 5
+
+        # Admin bulk-updates tag to one_time_per_player with 77 points
+        r_upd = admin_client.post(
+            "/admin/api/tags/bulk_update",
+            json={"ids": [tag_id], "strategy": "one_time_per_player", "strategy_params": {"points": 77}},
+        )
+        assert r_upd.status_code == 200
+
+        # Second scan should now award 77 points under the new strategy
+        rate_limiter.clear()
+        r2 = scan_tag(client, player_id, tag_id)
+        assert r2.get_json()["delta"] == 77
+
+    # BK-7: bulk_delete removes all listed tags from the system
+    def test_bulk_delete_removes_tags(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 1, "max": 1}, count=4)
+        ids = [t["id"] for t in tags]
+
+        r = admin_client.post("/admin/api/tags/bulk_delete", json={"ids": ids})
+        assert r.status_code == 200
+        assert r.get_json()["deleted"] == 4
+
+        # All four tags must be gone
+        r_list = admin_client.get("/admin/api/tags")
+        assert r_list.get_json()["total"] == 0
+
+    # BK-8: bulk_delete with a partial ID list leaves the remaining tags intact
+    def test_bulk_delete_partial_ids(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 1, "max": 1}, count=4)
+        ids_to_delete = [tags[0]["id"], tags[1]["id"]]
+
+        r = admin_client.post("/admin/api/tags/bulk_delete", json={"ids": ids_to_delete})
+        assert r.status_code == 200
+        assert r.get_json()["deleted"] == 2
+
+        # Two tags must still exist
+        r_list = admin_client.get("/admin/api/tags")
+        assert r_list.get_json()["total"] == 2
+
+    # BK-9: bulk_delete silently skips nonexistent IDs and returns the correct deleted count
+    def test_bulk_delete_skips_nonexistent_ids(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 1, "max": 1}, count=2)
+        ids = [t["id"] for t in tags]
+        ids_with_ghost = ids + ["ZZZZ-ZZZZ"]
+
+        r = admin_client.post("/admin/api/tags/bulk_delete", json={"ids": ids_with_ghost})
+        assert r.status_code == 200
+        # Only 2 real tags deleted; nonexistent ID silently skipped
+        assert r.get_json()["deleted"] == 2
+
+    # BK-10: bulk_delete returns 400 with INVALID_IDS when ids list is empty
+    def test_bulk_delete_returns_400_for_empty_ids(self, admin_client):
+        r = admin_client.post("/admin/api/tags/bulk_delete", json={"ids": []})
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "INVALID_IDS"
+
+    # BK-11: bulk_delete preserves scan events; tag_id is nulled out in the log entry
+    def test_bulk_delete_preserves_scan_events(self, client, admin_client):
+        start_game(admin_client)
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10}, count=1)
+        tag_id = tags[0]["id"]
+        player_id = make_player_id("player-bk11")
+        register_player(client, player_id, "PlayerBK11")
+
+        # Player scans the tag — creates a ScanEvent with the tag's id
+        rate_limiter.clear()
+        r_scan = scan_tag(client, player_id, tag_id)
+        assert r_scan.get_json()["status"] == "ok"
+
+        # Bulk-delete the tag
+        r_del = admin_client.post("/admin/api/tags/bulk_delete", json={"ids": [tag_id]})
+        assert r_del.status_code == 200
+        assert r_del.get_json()["deleted"] == 1
+
+        # The scan event must still appear in the log (scan history preserved)
+        r_log = admin_client.get("/admin/api/log")
+        all_items = r_log.get_json()["items"]
+        ok_events = [i for i in all_items if i["result"] == "ok"]
+        assert len(ok_events) >= 1
+
+        # tag_id must be null in the orphaned event (FK was nulled during delete)
+        orphaned = [i for i in ok_events if i["tag_id"] is None]
+        assert len(orphaned) >= 1
+
+    # BK-12: both bulk endpoints require admin authentication; unauthenticated requests get 401
+    def test_bulk_ops_require_auth(self, client, admin_client):
+        # bulk_update without auth → 401 UNAUTHORIZED
+        r_upd = client.post(
+            "/admin/api/tags/bulk_update",
+            json={"ids": ["A1B2-C3D4"]},
+        )
+        assert r_upd.status_code == 401
+        assert r_upd.get_json()["error"] == "UNAUTHORIZED"
+
+        # bulk_delete without auth → 401 UNAUTHORIZED
+        r_del = client.post(
+            "/admin/api/tags/bulk_delete",
+            json={"ids": ["A1B2-C3D4"]},
+        )
+        assert r_del.status_code == 401
+        assert r_del.get_json()["error"] == "UNAUTHORIZED"
