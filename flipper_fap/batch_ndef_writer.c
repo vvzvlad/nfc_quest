@@ -4,6 +4,9 @@
 #include <gui/modules/widget.h>
 #include <gui/modules/popup.h>
 #include <gui/modules/dialog_ex.h>
+#include <gui/modules/submenu.h>
+#include <gui/modules/file_browser.h>
+#include <gui/modules/variable_item_list.h>
 #include <input/input.h>
 #include <storage/storage.h>
 #include <toolbox/stream/buffered_file_stream.h>
@@ -22,10 +25,18 @@
 #define MAX_URLS 512
 #define NDEF_START_PAGE 4
 
+// Number of delay steps: 0ms to 3000ms in steps of 100ms (31 values: 0..30)
+#define DELAY_STEP_COUNT 31
+#define DELAY_STEP_MS    100
+#define DELAY_DEFAULT_MS 1000
+
 typedef enum {
-    ViewIdConfirm = 0,
-    ViewIdPolling,
-    ViewIdResult,
+    ViewIdMenu = 0,       // Submenu — main menu
+    ViewIdFileBrowser,    // FileBrowser — file picker
+    ViewIdSettings,       // VariableItemList — delay config
+    ViewIdConfirm,        // Widget — confirm writing
+    ViewIdPolling,        // Popup — waiting for tag
+    ViewIdResult,         // DialogEx — error or done screen
 } ViewId;
 
 typedef enum {
@@ -35,6 +46,11 @@ typedef enum {
     EvtCustomAbort,
     EvtCustomTagOk,
     EvtCustomTagFail,
+    EvtCustomMenuStart,    // "Start" selected in main menu
+    EvtCustomMenuFile,     // "Select File" selected in main menu
+    EvtCustomMenuSettings, // "Settings" selected in main menu
+    EvtCustomFilePicked,   // file selected in file browser
+    EvtCustomGoMenu,       // return to main menu (used after "All done" screen)
 } CustomEvent;
 
 typedef struct {
@@ -44,6 +60,13 @@ typedef struct {
     Popup* p_polling;
     DialogEx* d_result;
     NotificationApp* notifications;
+
+    // New GUI modules
+    Submenu* menu;
+    FileBrowser* file_browser;
+    FuriString* browser_result;   // output buffer for FileBrowser selected path
+    VariableItemList* settings_list;
+    VariableItem* delay_item;     // pointer to the delay setting item
 
     char** urls;
     size_t url_count;
@@ -58,12 +81,19 @@ typedef struct {
     char last_msg[64];    // written before volatile tag_present; DMB in scanner_cb ensures ordering
     char popup_hdr[40];   // persistent storage for popup header string (popup holds pointer)
     char url_preview[64]; // persistent storage for URL preview on polling screen (popup holds pointer)
+
+    // New settings and state
+    uint32_t delay_ms;          // delay between tags in ms (default 1000)
+    char selected_path[256];    // currently selected urls.txt path
+    bool at_menu;               // true when main menu is the active view
+    bool show_done;             // true when showing "All done" in result dialog
+    bool browser_running;       // true while FileBrowser is active (guards file_browser_stop calls)
 } App;
 
-static bool load_urls(App* app) {
+static bool load_urls_from_path(App* app, const char* path) {
     Storage* storage = furi_record_open(RECORD_STORAGE);
     Stream* s = buffered_file_stream_alloc(storage);
-    bool ok = buffered_file_stream_open(s, URLS_PATH, FSAM_READ, FSOM_OPEN_EXISTING);
+    bool ok = buffered_file_stream_open(s, path, FSAM_READ, FSOM_OPEN_EXISTING);
     if(!ok) goto done;
 
     app->urls = malloc(sizeof(char*) * MAX_URLS);
@@ -89,6 +119,8 @@ static void free_urls(App* app) {
     for(size_t i = 0; i < app->url_count; i++) free(app->urls[i]);
     free(app->urls);
     app->urls = NULL;
+    app->url_count = 0;
+    app->url_index = 0;
 }
 
 static uint8_t pick_prefix(const char* url, const char** rest) {
@@ -173,9 +205,10 @@ static int32_t worker_thread(void* ctx) {
     size_t padded = (total + 3) & ~3u;
     while(total < padded) buf[total++] = 0x00;
 
-    // Wait 1 second before scanning — gives user time to remove the previous tag
+    // Wait configured delay before scanning — gives user time to remove the previous tag
     // so we don't accidentally write the next URL to the same tag again
-    for(int wait_ms = 0; wait_ms < 1000 && !app->stop_request; wait_ms += 50) {
+    uint32_t wait_total = app->delay_ms;
+    for(uint32_t wait_ms = 0; wait_ms < wait_total && !app->stop_request; wait_ms += 50) {
         furi_delay_ms(50);
     }
     if(app->stop_request) {
@@ -290,8 +323,13 @@ static void on_result(DialogExResult r, void* c) {
     App* a = c;
     switch(r) {
     case DialogExResultCenter:
-        // Center button: on success → next URL; on failure → retry
-        view_dispatcher_send_custom_event(a->view_dispatcher, EvtCustomSkip);
+        if(a->show_done) {
+            // "All done" screen: OK returns to main menu for another batch
+            view_dispatcher_send_custom_event(a->view_dispatcher, EvtCustomGoMenu);
+        } else {
+            // Unused path (success screen no longer shown), kept for safety
+            view_dispatcher_send_custom_event(a->view_dispatcher, EvtCustomSkip);
+        }
         break;
     case DialogExResultLeft:
         // Left button: retry on failure screen
@@ -306,30 +344,176 @@ static void on_result(DialogExResult r, void* c) {
     }
 }
 
-static void show_result(App* app, bool ok) {
+// Show the write-failure result screen (Retry / Quit)
+static void show_result_fail(App* app) {
+    app->show_done = false;
     dialog_ex_reset(app->d_result);
-    dialog_ex_set_header(
-        app->d_result, ok ? "Success" : "Failed", 64, 4, AlignCenter, AlignTop);
+    dialog_ex_set_header(app->d_result, "Failed", 64, 4, AlignCenter, AlignTop);
     dialog_ex_set_text(app->d_result, app->last_msg, 64, 28, AlignCenter, AlignCenter);
-    if(ok) {
-        // Center → EvtCustomSkip → advances to next URL
-        dialog_ex_set_center_button_text(app->d_result, "Next");
-        // Right → EvtCustomAbort → exits the app
-        dialog_ex_set_right_button_text(app->d_result, "Quit");
-    } else {
-        // Left → EvtCustomRetry → retry this URL
-        dialog_ex_set_left_button_text(app->d_result, "Retry");
-        // Right → EvtCustomAbort → exits the app
-        dialog_ex_set_right_button_text(app->d_result, "Quit");
-    }
+    // Left → EvtCustomRetry → retry this URL
+    dialog_ex_set_left_button_text(app->d_result, "Retry");
+    // Right → EvtCustomAbort → exits the app
+    dialog_ex_set_right_button_text(app->d_result, "Quit");
     dialog_ex_set_result_callback(app->d_result, on_result);
     dialog_ex_set_context(app->d_result, app);
     view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdResult);
 }
 
+static void show_result_done(App* app) {
+    app->show_done = true;
+    dialog_ex_reset(app->d_result);
+    dialog_ex_set_header(app->d_result, "All done!", 64, 4, AlignCenter, AlignTop);
+    snprintf(app->last_msg, sizeof(app->last_msg), "Wrote %zu tags", app->url_count);
+    dialog_ex_set_text(app->d_result, app->last_msg, 64, 28, AlignCenter, AlignCenter);
+    // Center button "OK" → EvtCustomAbort (handled via show_done flag in on_result)
+    dialog_ex_set_center_button_text(app->d_result, "OK");
+    dialog_ex_set_result_callback(app->d_result, on_result);
+    dialog_ex_set_context(app->d_result, app);
+    view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdResult);
+}
+
+// --- Main menu ---
+
+static void on_menu_item(void* ctx, uint32_t index) {
+    App* app = ctx;
+    switch(index) {
+    case 0:
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomMenuStart);
+        break;
+    case 1:
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomMenuFile);
+        break;
+    case 2:
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomMenuSettings);
+        break;
+    }
+}
+
+static void show_menu(App* app) {
+    submenu_reset(app->menu);
+    submenu_set_header(app->menu, "Batch NDEF Writer");
+
+    // "Start" item — show how many URLs are loaded if any
+    char start_label[32];
+    if(app->url_count > 0) {
+        snprintf(start_label, sizeof(start_label), "Start (%zu URLs)", app->url_count);
+    } else {
+        snprintf(start_label, sizeof(start_label), "Start");
+    }
+    submenu_add_item(app->menu, start_label, 0, on_menu_item, app);
+    submenu_add_item(app->menu, "Select File", 1, on_menu_item, app);
+    submenu_add_item(app->menu, "Settings", 2, on_menu_item, app);
+
+    app->at_menu = true;
+    view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdMenu);
+}
+
+// --- File browser ---
+
+static void on_file_picked(void* ctx) {
+    App* app = ctx;
+    // Copy the selected path from the output buffer to app->selected_path
+    // Note: do NOT call file_browser_stop() here — this IS the browser callback;
+    // stopping the browser from within its own callback risks deadlock.
+    // Stop is done safely in the EvtCustomFilePicked handler instead.
+    const char* path = furi_string_get_cstr(app->browser_result);
+    strncpy(app->selected_path, path, sizeof(app->selected_path) - 1);
+    app->selected_path[sizeof(app->selected_path) - 1] = '\0';
+
+    // Signal the main event loop to stop the browser and return to menu
+    view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomFilePicked);
+}
+
+static void show_file_browser(App* app) {
+    file_browser_configure(app->file_browser, ".txt", "/ext", true, true, NULL, false);
+    file_browser_set_callback(app->file_browser, on_file_picked, app);
+
+    // Start the browser at /ext; allocate start path as local FuriString
+    FuriString* start_path = furi_string_alloc_set_str("/ext");
+    file_browser_start(app->file_browser, start_path);
+    furi_string_free(start_path);
+    app->browser_running = true;  // browser is now active
+
+    app->at_menu = false;
+    view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdFileBrowser);
+}
+
+// --- Settings ---
+
+static void on_delay_change(VariableItem* item) {
+    App* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    app->delay_ms = (uint32_t)idx * DELAY_STEP_MS;
+    char buf[8];
+    // Format as "X.Ys" using integer arithmetic to avoid float/double promotion warning
+    snprintf(buf, sizeof(buf), "%u.%us", (unsigned)(idx / 10), (unsigned)(idx % 10));
+    variable_item_set_current_value_text(item, buf);
+}
+
+static void show_settings(App* app) {
+    variable_item_list_reset(app->settings_list);
+
+    // Add "Delay" item: 31 values from 0.0s to 3.0s
+    app->delay_item = variable_item_list_add(
+        app->settings_list, "Delay", DELAY_STEP_COUNT, on_delay_change, app);
+
+    // Set current index and display text from stored delay_ms
+    uint8_t current_idx = (uint8_t)(app->delay_ms / DELAY_STEP_MS);
+    if(current_idx >= DELAY_STEP_COUNT) current_idx = DELAY_STEP_COUNT - 1;
+    variable_item_set_current_value_index(app->delay_item, current_idx);
+
+    char buf[8];
+    // Format as "X.Ys" using integer arithmetic to avoid float/double promotion warning
+    snprintf(buf, sizeof(buf), "%u.%us", (unsigned)(current_idx / 10), (unsigned)(current_idx % 10));
+    variable_item_set_current_value_text(app->delay_item, buf);
+
+    app->at_menu = false;
+    view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdSettings);
+}
+
+// --- Event callbacks ---
+
 static bool custom_event_cb(void* ctx, uint32_t event) {
     App* app = ctx;
     switch(event) {
+    case EvtCustomMenuStart: {
+        // If no URLs loaded, show an error popup and stay on menu
+        if(app->url_count == 0) {
+            popup_reset(app->p_polling);
+            popup_set_header(app->p_polling, "No URLs loaded", 64, 4, AlignCenter, AlignTop);
+            popup_set_text(
+                app->p_polling,
+                "Select a urls.txt file\nusing 'Select File'",
+                64, 30, AlignCenter, AlignCenter);
+            app->at_menu = false;
+            view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
+            return true;
+        }
+        // Reset index and show confirm screen for first tag
+        app->url_index = 0;
+        app->at_menu = false;
+        build_confirm(app);
+        view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdConfirm);
+        return true;
+    }
+    case EvtCustomMenuFile:
+        app->at_menu = false;
+        show_file_browser(app);
+        return true;
+    case EvtCustomMenuSettings:
+        show_settings(app);
+        return true;
+    case EvtCustomFilePicked:
+        // Stop the browser here (safe: we're in the main event loop, not inside the browser callback)
+        if(app->browser_running) {
+            file_browser_stop(app->file_browser);
+            app->browser_running = false;
+        }
+        // Reload URLs from the selected path and return to main menu
+        free_urls(app);
+        load_urls_from_path(app, app->selected_path);
+        show_menu(app);
+        return true;
     case EvtCustomStart: {
         if(app->worker) return true;  // prevent double-start
         popup_reset(app->p_polling);
@@ -344,17 +528,13 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
         return true;
     }
     case EvtCustomTagOk:
-        // Success: skip success screen, advance immediately and start writing next tag
+        // Success: advance immediately and start writing next tag
         join_worker(app);
         notification_message(app->notifications, &sequence_success);
         app->url_index++;
         if(app->url_index >= app->url_count) {
-            // All tags written — show final done message via popup then stop
-            popup_reset(app->p_polling);
-            popup_set_header(app->p_polling, "All done!", 64, 16, AlignCenter, AlignTop);
-            snprintf(app->last_msg, sizeof(app->last_msg), "Wrote %zu tags", app->url_count);
-            popup_set_text(app->p_polling, app->last_msg, 64, 36, AlignCenter, AlignCenter);
-            view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
+            // All tags written — show "All done" dialog with OK button
+            show_result_done(app);
         } else {
             // Auto-start writing next tag — show polling screen with next URL and launch worker
             popup_reset(app->p_polling);
@@ -369,12 +549,13 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
     case EvtCustomTagFail:
         join_worker(app);
         notification_message(app->notifications, &sequence_error);
-        show_result(app, false);
+        show_result_fail(app);
         return true;
     case EvtCustomSkip:
         app->url_index++;
         if(app->url_index >= app->url_count) {
-            view_dispatcher_stop(app->view_dispatcher);
+            // All done after skipping — show done screen
+            show_result_done(app);
         } else {
             build_confirm(app);
             view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdConfirm);
@@ -383,6 +564,12 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
     case EvtCustomRetry:
         build_confirm(app);
         view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdConfirm);
+        return true;
+    case EvtCustomGoMenu:
+        // Return to main menu (e.g. after "All done" screen)
+        free_urls(app);
+        load_urls_from_path(app, app->selected_path);
+        show_menu(app);
         return true;
     case EvtCustomAbort:
         join_worker(app);
@@ -394,8 +581,19 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
 
 static bool nav_cb(void* ctx) {
     App* app = ctx;
+    if(app->at_menu) {
+        // Back from main menu → quit the application
+        join_worker(app);
+        view_dispatcher_stop(app->view_dispatcher);
+        return true;
+    }
+    // Back from any other screen → stop worker, stop browser (only if running), return to menu
     join_worker(app);
-    view_dispatcher_stop(app->view_dispatcher);
+    if(app->browser_running) {
+        file_browser_stop(app->file_browser);
+        app->browser_running = false;
+    }
+    show_menu(app);
     return true;
 }
 
@@ -404,25 +602,13 @@ int32_t batch_ndef_writer_app(void* p) {
     App* app = malloc(sizeof(App));
     memset(app, 0, sizeof(App));
 
-    if(!load_urls(app)) {
-        DialogsApp* d = furi_record_open(RECORD_DIALOGS);
-        DialogMessage* m = dialog_message_alloc();
-        dialog_message_set_header(m, "No URLs", 64, 4, AlignCenter, AlignTop);
-        dialog_message_set_text(
-            m,
-            "Copy urls.txt to SD:\n/ext/apps_data/\nbatch_ndef_writer/",
-            64,
-            32,
-            AlignCenter,
-            AlignCenter);
-        dialog_message_set_buttons(m, NULL, "OK", NULL);
-        dialog_message_show(d, m);
-        dialog_message_free(m);
-        furi_record_close(RECORD_DIALOGS);
-        free_urls(app);  // release urls array if file existed but had no valid entries
-        free(app);
-        return 0;
-    }
+    // Initialize settings defaults
+    app->delay_ms = DELAY_DEFAULT_MS;
+    strncpy(app->selected_path, URLS_PATH, sizeof(app->selected_path) - 1);
+    app->selected_path[sizeof(app->selected_path) - 1] = '\0';
+
+    // Try to load URLs from default path — may fail, user can select file from menu
+    load_urls_from_path(app, app->selected_path);
 
     app->gui = furi_record_open(RECORD_GUI);
     app->notifications = furi_record_open(RECORD_NOTIFICATION);
@@ -434,9 +620,22 @@ int32_t batch_ndef_writer_app(void* p) {
     view_dispatcher_set_custom_event_callback(app->view_dispatcher, custom_event_cb);
     view_dispatcher_set_navigation_event_callback(app->view_dispatcher, nav_cb);
 
+    // Allocate GUI modules
     app->w_confirm = widget_alloc();
     app->p_polling = popup_alloc();
     app->d_result = dialog_ex_alloc();
+    app->menu = submenu_alloc();
+    app->browser_result = furi_string_alloc();
+    app->file_browser = file_browser_alloc(app->browser_result);
+    app->settings_list = variable_item_list_alloc();
+
+    // Register views with the dispatcher
+    view_dispatcher_add_view(
+        app->view_dispatcher, ViewIdMenu, submenu_get_view(app->menu));
+    view_dispatcher_add_view(
+        app->view_dispatcher, ViewIdFileBrowser, file_browser_get_view(app->file_browser));
+    view_dispatcher_add_view(
+        app->view_dispatcher, ViewIdSettings, variable_item_list_get_view(app->settings_list));
     view_dispatcher_add_view(
         app->view_dispatcher, ViewIdConfirm, widget_get_view(app->w_confirm));
     view_dispatcher_add_view(
@@ -444,17 +643,29 @@ int32_t batch_ndef_writer_app(void* p) {
     view_dispatcher_add_view(
         app->view_dispatcher, ViewIdResult, dialog_ex_get_view(app->d_result));
 
-    app->url_index = 0;
-    build_confirm(app);
-    view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdConfirm);
+    // Start with the main menu
+    show_menu(app);
 
     view_dispatcher_run(app->view_dispatcher);
 
     // Teardown
     join_worker(app);
+    if(app->browser_running) {
+        file_browser_stop(app->file_browser);
+        app->browser_running = false;
+    }
+
+    view_dispatcher_remove_view(app->view_dispatcher, ViewIdMenu);
+    view_dispatcher_remove_view(app->view_dispatcher, ViewIdFileBrowser);
+    view_dispatcher_remove_view(app->view_dispatcher, ViewIdSettings);
     view_dispatcher_remove_view(app->view_dispatcher, ViewIdConfirm);
     view_dispatcher_remove_view(app->view_dispatcher, ViewIdPolling);
     view_dispatcher_remove_view(app->view_dispatcher, ViewIdResult);
+
+    submenu_free(app->menu);
+    file_browser_free(app->file_browser);
+    furi_string_free(app->browser_result);
+    variable_item_list_free(app->settings_list);
     widget_free(app->w_confirm);
     popup_free(app->p_polling);
     dialog_ex_free(app->d_result);
