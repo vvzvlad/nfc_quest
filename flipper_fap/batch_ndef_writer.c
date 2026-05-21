@@ -55,7 +55,9 @@ typedef struct {
     volatile bool tag_present;
     volatile bool stop_request;
     volatile MfUltralightError last_err;
-    char last_msg[64];  // written before volatile tag_present; DMB in scanner_cb ensures ordering
+    char last_msg[64];    // written before volatile tag_present; DMB in scanner_cb ensures ordering
+    char popup_hdr[40];   // persistent storage for popup header string (popup holds pointer)
+    char url_preview[64]; // persistent storage for URL preview on polling screen (popup holds pointer)
 } App;
 
 static bool load_urls(App* app) {
@@ -170,6 +172,16 @@ static int32_t worker_thread(void* ctx) {
 
     size_t padded = (total + 3) & ~3u;
     while(total < padded) buf[total++] = 0x00;
+
+    // Wait 1 second before scanning — gives user time to remove the previous tag
+    // so we don't accidentally write the next URL to the same tag again
+    for(int wait_ms = 0; wait_ms < 1000 && !app->stop_request; wait_ms += 50) {
+        furi_delay_ms(50);
+    }
+    if(app->stop_request) {
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomAbort);
+        return 0;
+    }
 
     app->tag_present = false;
     app->last_err = MfUltralightErrorNone;
@@ -318,24 +330,41 @@ static void show_result(App* app, bool ok) {
 static bool custom_event_cb(void* ctx, uint32_t event) {
     App* app = ctx;
     switch(event) {
-    case EvtCustomStart:
+    case EvtCustomStart: {
         if(app->worker) return true;  // prevent double-start
         popup_reset(app->p_polling);
-        popup_set_header(app->p_polling, "Present tag", 64, 12, AlignCenter, AlignTop);
-        popup_set_text(
-            app->p_polling,
-            "Hold an NTAG21x to\nthe back of Flipper",
-            64,
-            30,
-            AlignCenter,
-            AlignCenter);
+        // Show "Tag N/M: URL" header
+        snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Tag %zu/%zu", app->url_index + 1, app->url_count);
+        popup_set_header(app->p_polling, app->popup_hdr, 64, 4, AlignCenter, AlignTop);
+        // Show truncated URL being written (stored persistently since popup holds the pointer)
+        snprintf(app->url_preview, sizeof(app->url_preview), "%.60s", app->urls[app->url_index]);
+        popup_set_text(app->p_polling, app->url_preview, 64, 28, AlignCenter, AlignCenter);
         view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
         start_worker(app);
         return true;
+    }
     case EvtCustomTagOk:
+        // Success: skip success screen, advance immediately and start writing next tag
         join_worker(app);
         notification_message(app->notifications, &sequence_success);
-        show_result(app, true);
+        app->url_index++;
+        if(app->url_index >= app->url_count) {
+            // All tags written — show final done message via popup then stop
+            popup_reset(app->p_polling);
+            popup_set_header(app->p_polling, "All done!", 64, 16, AlignCenter, AlignTop);
+            snprintf(app->last_msg, sizeof(app->last_msg), "Wrote %zu tags", app->url_count);
+            popup_set_text(app->p_polling, app->last_msg, 64, 36, AlignCenter, AlignCenter);
+            view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
+        } else {
+            // Auto-start writing next tag — show polling screen with next URL and launch worker
+            popup_reset(app->p_polling);
+            snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Tag %zu/%zu", app->url_index + 1, app->url_count);
+            popup_set_header(app->p_polling, app->popup_hdr, 64, 4, AlignCenter, AlignTop);
+            snprintf(app->url_preview, sizeof(app->url_preview), "%.60s", app->urls[app->url_index]);
+            popup_set_text(app->p_polling, app->url_preview, 64, 28, AlignCenter, AlignCenter);
+            view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
+            start_worker(app);
+        }
         return true;
     case EvtCustomTagFail:
         join_worker(app);
