@@ -420,7 +420,10 @@ def update_tag(tag_id):
 
     # Handle tag_id rename if new_id is provided
     if "new_id" in data:
-        new_id = data["new_id"].strip().upper()
+        raw_new_id = data["new_id"]
+        if not isinstance(raw_new_id, str):
+            return jsonify({"error": "INVALID_TAG_ID_FORMAT"}), 400
+        new_id = raw_new_id.strip().upper()
         if not re.match(r'^[0-9A-F]{4}-[0-9A-F]{4}$', new_id):
             return jsonify({"error": "INVALID_TAG_ID_FORMAT"}), 400
         if new_id != tag_id:
@@ -441,7 +444,8 @@ def update_tag(tag_id):
             db.session.query(ScanEvent).filter_by(tag_id=tag_id).update({"tag_id": new_id})
             db.session.query(TagPlayerScan).filter_by(tag_id=tag_id).update({"tag_id": new_id})
             db.session.flush()
-            db.session.delete(tag)
+            # Use direct SQL DELETE to bypass ORM cascade and avoid accidental orphan deletion
+            db.session.execute(db.delete(Tag).where(Tag.id == tag_id))
             db.session.flush()
             tag = new_tag  # continue applying other fields to the new tag
 

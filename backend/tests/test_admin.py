@@ -339,6 +339,198 @@ class TestAdminTags:
             assert s["params_type"] in ("points", "range")
 
 
+class TestAdminTagRename:
+    # R-1: Renaming a tag to a new valid ID succeeds and preserves all fields
+    def test_rename_tag_id_happy_path(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 5, "max": 5})
+        old_id = tags[0]["id"]
+
+        # Rename to a deterministic ID
+        r = admin_client.put(f"/admin/api/tags/{old_id}", json={"new_id": "AAAA-BBBB"})
+        assert r.status_code == 200
+        res = r.get_json()
+        assert res["id"] == "AAAA-BBBB"
+
+        # Strategy and params must be preserved from the original tag
+        assert res["strategy"] == "random"
+        assert res["strategy_params"]["min"] == 5
+        assert res["strategy_params"]["max"] == 5
+
+        # GET /admin/api/tags: new ID must be present, old ID must be absent
+        r_list = admin_client.get("/admin/api/tags")
+        ids = [t["id"] for t in r_list.get_json()["items"]]
+        assert "AAAA-BBBB" in ids
+        assert old_id not in ids
+
+    # R-1b: Renaming a blocked tag preserves its is_blocked state
+    def test_rename_tag_id_preserves_is_blocked(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, make_player_id("player-rename-r1b"), "PlayerRenameR1b")
+        tags = create_tag(admin_client, "one_time_global", {"points": 10})
+        old_id = tags[0]["id"]
+
+        # Scan the tag once — this blocks it (one_time_global strategy)
+        rate_limiter.clear()
+        r_scan = scan_tag(client, make_player_id("player-rename-r1b"), old_id)
+        assert r_scan.get_json()["status"] == "ok"
+
+        # Verify the tag is now blocked
+        r_tags = admin_client.get("/admin/api/tags")
+        the_tag = next(t for t in r_tags.get_json()["items"] if t["id"] == old_id)
+        assert the_tag["is_blocked"] is True
+
+        # Rename the blocked tag
+        r_rename = admin_client.put(f"/admin/api/tags/{old_id}", json={"new_id": "BBBB-CCCC"})
+        assert r_rename.status_code == 200
+
+        # The new tag must still be blocked
+        r_tags2 = admin_client.get("/admin/api/tags")
+        new_tag = next(t for t in r_tags2.get_json()["items"] if t["id"] == "BBBB-CCCC")
+        assert new_tag["is_blocked"] is True
+
+    # R-2: ScanEvent FK references are migrated to the new tag_id after rename
+    def test_rename_tag_id_migrates_scan_events(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, make_player_id("player-rename-r2"), "PlayerRenameR2")
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        old_id = tags[0]["id"]
+
+        # Player scans the original tag — creates a ScanEvent with old tag_id
+        rate_limiter.clear()
+        r_scan = scan_tag(client, make_player_id("player-rename-r2"), old_id)
+        assert r_scan.get_json()["status"] == "ok"
+
+        # Rename the tag
+        r_rename = admin_client.put(f"/admin/api/tags/{old_id}", json={"new_id": "CCCC-DDDD"})
+        assert r_rename.status_code == 200
+
+        # Scan log must show the new tag_id for the previously recorded event
+        r_log = admin_client.get("/admin/api/log")
+        items = r_log.get_json()["items"]
+        ok_items = [i for i in items if i["result"] == "ok"]
+        assert len(ok_items) == 1
+        # Every ok scan entry must now reference the new tag_id
+        for item in ok_items:
+            assert item["tag_id"] == "CCCC-DDDD", (
+                f"Expected tag_id 'CCCC-DDDD' but got '{item['tag_id']}'"
+            )
+        # No entry should reference the old tag_id anymore
+        old_id_items = [i for i in items if i["tag_id"] == old_id]
+        assert old_id_items == []
+
+    # R-3: TagPlayerScan FK references are migrated — scan still shows "locked" after rename
+    def test_rename_tag_id_migrates_tag_player_scans(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, make_player_id("player-rename-r3"), "PlayerRenameR3")
+        tags = create_tag(admin_client, "one_time_per_player", {"points": 15})
+        old_id = tags[0]["id"]
+
+        # First scan succeeds and locks the tag for this player
+        rate_limiter.clear()
+        r1 = scan_tag(client, make_player_id("player-rename-r3"), old_id)
+        assert r1.get_json()["status"] == "ok"
+
+        # Second scan on the old_id is locked
+        rate_limiter.clear()
+        r2 = scan_tag(client, make_player_id("player-rename-r3"), old_id)
+        assert r2.get_json()["status"] == "locked"
+
+        # Rename the tag to a new ID
+        r_rename = admin_client.put(f"/admin/api/tags/{old_id}", json={"new_id": "EEEE-FFFF"})
+        assert r_rename.status_code == 200
+
+        # Player scans the NEW tag ID — TagPlayerScan migrated, so still locked
+        rate_limiter.clear()
+        r3 = scan_tag(client, make_player_id("player-rename-r3"), "EEEE-FFFF")
+        assert r3.get_json()["status"] == "locked"
+
+    # R-4: Sending new_id equal to current tag_id is a no-op and returns 200
+    def test_rename_tag_id_same_id_is_noop(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 7, "max": 7})
+        tag_id = tags[0]["id"]
+
+        # PUT with new_id == existing id
+        r = admin_client.put(f"/admin/api/tags/{tag_id}", json={"new_id": tag_id})
+        assert r.status_code == 200
+        assert r.get_json()["id"] == tag_id
+
+        # Tag must still exist under the same ID
+        r_list = admin_client.get("/admin/api/tags")
+        ids = [t["id"] for t in r_list.get_json()["items"]]
+        assert tag_id in ids
+
+    # R-5: Trying to rename a tag to an ID that is already taken returns 409
+    def test_rename_tag_id_collision(self, admin_client):
+        tags1 = create_tag(admin_client, "random", {"min": 1, "max": 1})
+        tags2 = create_tag(admin_client, "random", {"min": 2, "max": 2})
+        tag1_id = tags1[0]["id"]
+        tag2_id = tags2[0]["id"]
+
+        # Try to rename tag1 to tag2's ID — should fail with 409
+        r = admin_client.put(f"/admin/api/tags/{tag1_id}", json={"new_id": tag2_id})
+        assert r.status_code == 409
+        assert r.get_json()["error"] == "TAG_ID_ALREADY_EXISTS"
+
+    # R-6: new_id with an invalid format returns 400
+    def test_rename_tag_id_invalid_format(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 3, "max": 3})
+        tag_id = tags[0]["id"]
+
+        # Non-hex characters — 'Z' is not a hex digit
+        r1 = admin_client.put(f"/admin/api/tags/{tag_id}", json={"new_id": "ZZZZ-ZZZZ"})
+        assert r1.status_code == 400
+        assert r1.get_json()["error"] == "INVALID_TAG_ID_FORMAT"
+
+        # Missing dash separator — wrong format entirely
+        r2 = admin_client.put(f"/admin/api/tags/{tag_id}", json={"new_id": "AAAABBBB"})
+        assert r2.status_code == 400
+        assert r2.get_json()["error"] == "INVALID_TAG_ID_FORMAT"
+
+        # Lowercase input is valid — backend normalises to uppercase
+        r3 = admin_client.put(f"/admin/api/tags/{tag_id}", json={"new_id": "aaaa-cccc"})
+        assert r3.status_code == 200
+        assert r3.get_json()["id"] == "AAAA-CCCC"
+
+    # R-7: new_id: null returns 400 (non-string value is rejected)
+    def test_rename_tag_id_null_value(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 4, "max": 4})
+        tag_id = tags[0]["id"]
+
+        r = admin_client.put(f"/admin/api/tags/{tag_id}", json={"new_id": None})
+        assert r.status_code == 400
+        assert r.get_json()["error"] == "INVALID_TAG_ID_FORMAT"
+
+    # R-8: rename and field updates can be applied in a single PUT request
+    def test_rename_tag_id_combined_with_field_update(self, admin_client):
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        tag_id = tags[0]["id"]
+
+        # Update the label first so we have a known starting label
+        admin_client.put(f"/admin/api/tags/{tag_id}", json={"label": "old_label"})
+
+        # Rename + change label + update strategy_params in one request
+        r = admin_client.put(
+            f"/admin/api/tags/{tag_id}",
+            json={
+                "new_id": "1111-2222",
+                "label": "new_label",
+                "strategy_params": {"min": 99, "max": 99},
+            },
+        )
+        assert r.status_code == 200
+        res = r.get_json()
+        assert res["id"] == "1111-2222"
+        assert res["label"] == "new_label"
+        assert res["strategy_params"]["min"] == 99
+        assert res["strategy_params"]["max"] == 99
+
+        # Old ID must no longer appear in the tag list
+        r_list = admin_client.get("/admin/api/tags")
+        ids = [t["id"] for t in r_list.get_json()["items"]]
+        assert "1111-2222" in ids
+        assert tag_id not in ids
+
+
 class TestAdminPlayers:
     # G5: Deleting all players resets blocked tags so they can be scanned again
     def test_delete_all_players_resets_blocked_tags(self, client, admin_client):

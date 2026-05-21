@@ -778,13 +778,19 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
     } else {
       strategy_params = { points: parseInt(editParams) || 0 };
     }
+    // Validate tag_id field is not empty before saving
+    if (!editTagId.trim()) {
+      setSaveError('tag_id не может быть пустым');
+      setSaving(false);
+      return;
+    }
     const payload = {
       strategy: editStrategy,
       strategy_params,
       label: editLabel || null,
     };
     // Include new_id only if it has changed
-    if (editTagId && editTagId !== tag.id) {
+    if (editTagId !== tag.id) {
       payload.new_id = editTagId;
     }
     const res = await adminApi.updateTag(tag.id, payload);
