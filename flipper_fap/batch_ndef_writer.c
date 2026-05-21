@@ -84,6 +84,7 @@ typedef struct {
 
     // New settings and state
     uint32_t delay_ms;          // delay between tags in ms (default 1000)
+    bool lock_after_write;      // if true, lock tag after writing NDEF (irreversible)
     char selected_path[256];    // currently selected urls.txt path
     bool at_menu;               // true when main menu is the active view
     bool show_done;             // true when showing "All done" in result dialog
@@ -192,6 +193,32 @@ static void scanner_cb(NfcScannerEvent event, void* ctx) {
     }
 }
 
+// Permanently lock an NTAG21x tag — IRREVERSIBLE.
+// Applies static lock bytes (page 2, bytes 2-3) and dynamic lock bytes (page 40 for NTAG213).
+// Returns true if static locking succeeded (dynamic lock failure is non-fatal).
+static bool lock_tag(App* app) {
+    // Step 1: Read current page 2 (bytes 0-1 hold UID bytes 4-6; must be preserved)
+    MfUltralightPage page2;
+    MfUltralightError err = mf_ultralight_poller_sync_read_page(app->nfc, 2, &page2);
+    if(err != MfUltralightErrorNone) {
+        return false;
+    }
+    // Step 2: Set static lock bits (bytes 2-3 = 0xFF 0xFF) — permanently write-protects pages 3-15
+    page2.data[2] = 0xFF;
+    page2.data[3] = 0xFF;
+    err = mf_ultralight_poller_sync_write_page(app->nfc, 2, &page2);
+    if(err != MfUltralightErrorNone) {
+        return false;
+    }
+    // Step 3: Write dynamic lock bytes — page 40 for NTAG213 (byte 3 = RFUI, must be 0)
+    // For NTAG215/216 the dynamic lock page differs (130/226) but static lock already applied above.
+    MfUltralightPage lock_dyn = {{0x03, 0x00, 0x00, 0x00}};
+    err = mf_ultralight_poller_sync_write_page(app->nfc, 40, &lock_dyn);
+    // Dynamic lock failure is non-fatal — static lock was already committed
+    (void)err;
+    return true;
+}
+
 static int32_t worker_thread(void* ctx) {
     App* app = ctx;
     uint8_t buf[1 + 4 + 256] = {0};
@@ -257,6 +284,19 @@ static int32_t worker_thread(void* ctx) {
                 (unsigned)(NDEF_START_PAGE + p),
                 err);
             view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomTagFail);
+            return 0;
+        }
+    }
+    // All NDEF pages written successfully — optionally lock the tag
+    if(app->lock_after_write) {
+        bool locked = lock_tag(app);
+        if(!locked) {
+            // NDEF write succeeded; report partial success — locking failed
+            snprintf(
+                app->last_msg,
+                sizeof(app->last_msg),
+                "Write OK, lock failed");
+            view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomTagOk);
             return 0;
         }
     }
@@ -440,6 +480,13 @@ static void show_file_browser(App* app) {
 
 // --- Settings ---
 
+static void on_lock_change(VariableItem* item) {
+    App* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    app->lock_after_write = (idx == 1);
+    variable_item_set_current_value_text(item, app->lock_after_write ? "ON" : "OFF");
+}
+
 static void on_delay_change(VariableItem* item) {
     App* app = variable_item_get_context(item);
     uint8_t idx = variable_item_get_current_value_index(item);
@@ -466,6 +513,12 @@ static void show_settings(App* app) {
     // Format as "X.Ys" using integer arithmetic to avoid float/double promotion warning
     snprintf(buf, sizeof(buf), "%u.%us", (unsigned)(current_idx / 10), (unsigned)(current_idx % 10));
     variable_item_set_current_value_text(app->delay_item, buf);
+
+    // Add "Lock tag" item: 2 values — OFF (index 0) / ON (index 1)
+    VariableItem* lock_item = variable_item_list_add(
+        app->settings_list, "Lock tag", 2, on_lock_change, app);
+    variable_item_set_current_value_index(lock_item, app->lock_after_write ? 1 : 0);
+    variable_item_set_current_value_text(lock_item, app->lock_after_write ? "ON" : "OFF");
 
     app->at_menu = false;
     view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdSettings);
@@ -604,6 +657,7 @@ int32_t batch_ndef_writer_app(void* p) {
 
     // Initialize settings defaults
     app->delay_ms = DELAY_DEFAULT_MS;
+    app->lock_after_write = false;
     strncpy(app->selected_path, URLS_PATH, sizeof(app->selected_path) - 1);
     app->selected_path[sizeof(app->selected_path) - 1] = '\0';
 
