@@ -144,6 +144,8 @@ export const adminApi = {
   deleteTag: (id) => del(`/admin/api/tags/${id}`),
   resetTag: (id) => post(`/admin/api/tags/${id}/reset`, {}),
   deleteAllTags: () => del('/admin/api/tags'),
+  bulkUpdateTags: (data) => post('/admin/api/tags/bulk_update', data),
+  bulkDeleteTags: (data) => post('/admin/api/tags/bulk_delete', data),
 
   getLog: (params = {}) => get('/admin/api/log?' + new URLSearchParams(params)),
   getStats: () => get('/admin/api/stats'),

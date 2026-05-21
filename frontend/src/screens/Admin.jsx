@@ -545,6 +545,13 @@ function KV({ k, v }) {
   );
 }
 
+// Returns true if the given strategy name uses range params (min/max) instead of single points
+function isRangeStrategy(strategyName, strategies) {
+  const found = strategies.find(s => s.name === strategyName);
+  if (found) return found.params_type === 'range';
+  return strategyName === 'random'; // fallback while loading
+}
+
 // Strip tag_id suffix from label if present (e.g. "hall · ED7A-B422" → "hall")
 const stripIdSuffix = (label, id) => {
   if (!label) return '—';
@@ -565,6 +572,8 @@ function ScreenAdminTags() {
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [selectedTag, setSelectedTag] = React.useState(null);
   const [exportingTags, setExportingTags] = React.useState(false);
+  const [selectedIds, setSelectedIds] = React.useState(new Set()); // selected tag IDs (persists across pages)
+  const [bulkEditOpen, setBulkEditOpen] = React.useState(false);   // whether bulk edit panel is shown
   const perPage = 50;
   const requestIdRef = React.useRef(0);
 
@@ -648,10 +657,67 @@ function ScreenAdminTags() {
             </div>
           </div>
 
+          {/* bulk action bar — visible only when at least one tag is selected */}
+          {selectedIds.size > 0 && (
+            <div style={{
+              padding: '8px 24px',
+              borderBottom: '1px solid var(--line)',
+              background: 'rgba(240,180,41,0.06)',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <span className="mono" style={{ fontSize: 11, color: 'var(--fg)' }}>
+                выбрано · {selectedIds.size}
+              </span>
+              <span style={{ flex: 1 }} />
+              <button className="btn ghost sm" onClick={() => { setSelectedIds(new Set()); setBulkEditOpen(false); }}>
+                снять выделение
+              </button>
+              <button className="btn ghost sm" onClick={() => setBulkEditOpen(true)}>
+                изменить стратегию / параметры
+              </button>
+              <button
+                className="btn sm"
+                style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'transparent' }}
+                onClick={async () => {
+                  if (!window.confirm(`Удалить ${selectedIds.size} меток? Это действие необратимо.`)) return;
+                  const res = await adminApi.bulkDeleteTags({ ids: [...selectedIds] });
+                  if (!res.ok) {
+                    window.alert(res.data?.error || 'Ошибка удаления');
+                    return;
+                  }
+                  setSelectedIds(new Set());
+                  setBulkEditOpen(false);
+                  loadTags();
+                }}
+              >
+                удалить выбранные
+              </button>
+            </div>
+          )}
+
           {/* dense table */}
           <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 12, fontFamily: 'var(--font-sans)' }}>
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--muted)', fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', background: 'var(--bg-2)' }}>
+                {/* checkbox column header — selects/deselects all tags on current page */}
+                <th style={{ padding: '6px 12px', borderBottom: '1px solid var(--line)', width: 40 }}>
+                  <input
+                    type="checkbox"
+                    style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
+                    checked={tags.length > 0 && tags.every(t => selectedIds.has(t.id))}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        setSelectedIds(prev => new Set([...prev, ...tags.map(t => t.id)]));
+                      } else {
+                        setSelectedIds(prev => {
+                          const next = new Set(prev);
+                          tags.forEach(t => next.delete(t.id));
+                          return next;
+                        });
+                      }
+                    }}
+                  />
+                </th>
                 {[
                   ['tag_id', 110],
                   ['label', null],
@@ -684,6 +750,22 @@ function ScreenAdminTags() {
                     background: selectedTag && selectedTag.id === t.id ? 'var(--bg-2)' : i === 0 && !selectedTag ? 'var(--bg-2)' : 'transparent',
                     cursor: 'pointer',
                   }}>
+                    {/* per-row checkbox — stopPropagation prevents opening TagDetailPanel */}
+                    <td style={{ padding: '5px 12px' }} onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
+                        checked={selectedIds.has(t.id)}
+                        onChange={() => {
+                          setSelectedIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(t.id)) next.delete(t.id);
+                            else next.add(t.id);
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg)' }}>{t.id}</td>
                     <td style={{ padding: '5px 12px', color: 'var(--fg-2)' }}>{stripIdSuffix(t.label, t.id)}</td>
                     <td style={{ padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-2)' }}>
@@ -702,7 +784,7 @@ function ScreenAdminTags() {
               })}
               {!loading && tags.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--muted)' }}>
+                  <td colSpan={10} style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--muted)' }}>
                     {debouncedSearch ? 'Метки не найдены по запросу' : 'Метки не созданы. Нажмите «+ массовое создание».'}
                   </td>
                 </tr>
@@ -720,13 +802,22 @@ function ScreenAdminTags() {
           </div>
         </div>
 
-        {/* side — tag detail/edit panel */}
-        <TagDetailPanel
-          tag={selectedTag}
-          onClose={() => setSelectedTag(null)}
-          onDelete={async (id) => { await handleDelete(id); }}
-          onSaved={(updatedTag) => { setSelectedTag(updatedTag); loadTags(); }}
-        />
+        {/* side — bulk edit panel or tag detail/edit panel */}
+        {bulkEditOpen ? (
+          <BulkEditPanel
+            selectedCount={selectedIds.size}
+            selectedIds={[...selectedIds]}
+            onClose={() => setBulkEditOpen(false)}
+            onSaved={() => { setBulkEditOpen(false); setSelectedIds(new Set()); loadTags(); }}
+          />
+        ) : (
+          <TagDetailPanel
+            tag={selectedTag}
+            onClose={() => setSelectedTag(null)}
+            onDelete={async (id) => { await handleDelete(id); }}
+            onSaved={(updatedTag) => { setSelectedTag(updatedTag); loadTags(); }}
+          />
+        )}
 
       </div>
     </AdminShell>
@@ -748,10 +839,8 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
     adminApi.getStrategies().then(r => { if (r.ok) setStrategies(r.data.strategies || []); });
   }, []);
 
-  // Helper: check if a strategy name uses range params (min/max) instead of single points
-  const isRangeStrategy = (name) =>
-    strategies.find(s => s.name === name)?.params_type === 'range'
-    || (!strategies.length && name === 'random'); // fallback while loading
+  // Use module-level isRangeStrategy helper (accepts strategy name + loaded strategies list)
+  const isRange = (name) => isRangeStrategy(name, strategies);
 
   React.useEffect(() => {
     if (tag) {
@@ -761,7 +850,7 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
       setEditTagId(tag.id || '');
       setSaveError(null);
       const sp = tag.strategy_params || {};
-      if ((strategies.find(s => s.name === tag.strategy)?.params_type ?? (tag.strategy === 'random' ? 'range' : 'points')) === 'range') {
+      if (isRangeStrategy(tag.strategy, strategies)) {
         setEditParams(JSON.stringify({ min: sp.min ?? 0, max: sp.max ?? 0 }));
       } else {
         setEditParams(String(sp.points ?? 0));
@@ -773,7 +862,7 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
     setSaving(true);
     setSaveError(null);
     let strategy_params;
-    if (isRangeStrategy(editStrategy)) {
+    if (isRange(editStrategy)) {
       try { strategy_params = JSON.parse(editParams); } catch { strategy_params = { min: 0, max: 0 }; }
     } else {
       strategy_params = { points: parseInt(editParams) || 0 };
@@ -871,7 +960,7 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
               }
             </select>
           </Field>
-          <Field label={isRangeStrategy(editStrategy) ? 'параметры (JSON: {"min": N, "max": M})' : 'баллы'}>
+          <Field label={isRange(editStrategy) ? 'параметры (JSON: {"min": N, "max": M})' : 'баллы'}>
             <input className="input" value={editParams} onChange={e => setEditParams(e.target.value)} />
           </Field>
 
@@ -925,6 +1014,103 @@ function TagDetailPanel({ tag, onClose, onDelete, onSaved }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function BulkEditPanel({ selectedCount, selectedIds, onClose, onSaved }) {
+  const [strategies, setStrategies] = React.useState([]);
+  const [editStrategy, setEditStrategy] = React.useState('');
+  const [editParams, setEditParams] = React.useState('50');
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState(null);
+
+  // Load available strategies from backend on mount
+  React.useEffect(() => {
+    adminApi.getStrategies().then(r => {
+      if (r.ok) {
+        const list = r.data.strategies || [];
+        setStrategies(list);
+        if (list.length > 0) setEditStrategy(list[0].name);
+      }
+    });
+  }, []);
+
+  // Reset params field when strategy type changes to avoid stale JSON/number mismatch.
+  // Guard: skip reset until strategies list is loaded to prevent incorrect fallback.
+  React.useEffect(() => {
+    if (!editStrategy || strategies.length === 0) return;
+    setEditParams(isRangeStrategy(editStrategy, strategies)
+      ? JSON.stringify({ min: 0, max: 0 })
+      : '50');
+  }, [editStrategy, strategies]);
+
+  const isRange = isRangeStrategy(editStrategy, strategies);
+
+  const handleApply = async () => {
+    setSaving(true);
+    setSaveError(null);
+    let strategy_params;
+    if (isRange) {
+      try { strategy_params = JSON.parse(editParams); }
+      catch { strategy_params = { min: 0, max: 0 }; }
+    } else {
+      strategy_params = { points: parseInt(editParams) || 0 };
+    }
+    const res = await adminApi.bulkUpdateTags({
+      ids: selectedIds,
+      strategy: editStrategy,
+      strategy_params,
+    });
+    setSaving(false);
+    if (res.ok) {
+      setSaveError(null);
+      onSaved();
+    } else {
+      setSaveError(res.data?.error || 'Ошибка сохранения');
+    }
+  };
+
+  return (
+    <div style={{ borderLeft: '1px solid var(--line)', background: 'var(--bg-2)', padding: 20, display: 'flex', flexDirection: 'column', gap: 18, overflow: 'auto' }}>
+      {/* header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="brak" style={{ fontSize: 11 }}>[ групповое изменение · {selectedCount} меток ]</div>
+        <span className="mono" style={{ fontSize: 10, color: 'var(--muted)', cursor: 'pointer' }} onClick={onClose}>✕</span>
+      </div>
+
+      <Field label="стратегия">
+        <select
+          className="input"
+          value={editStrategy}
+          onChange={e => setEditStrategy(e.target.value)}
+          disabled={strategies.length === 0}
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}
+        >
+          {strategies.length === 0
+            ? <option value="">loading…</option>
+            : strategies.map(s => <option key={s.name} value={s.name}>{s.name}</option>)
+          }
+        </select>
+      </Field>
+
+      <Field label={isRange ? 'параметры (JSON: {"min": N, "max": M})' : 'баллы'}>
+        <input className="input" value={editParams} onChange={e => setEditParams(e.target.value)} />
+      </Field>
+
+      {saveError && (
+        <div className="mono" style={{ fontSize: 11, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 6, height: 6, background: 'var(--accent)', flexShrink: 0 }} />
+          {saveError}
+        </div>
+      )}
+
+      <div style={{ marginTop: 'auto', display: 'flex', gap: 8 }}>
+        <button className="btn ghost sm" style={{ flex: 1 }} onClick={onClose}>Отмена</button>
+        <button className="btn sm" style={{ flex: 1 }} onClick={handleApply} disabled={saving || strategies.length === 0}>
+          {saving ? 'Сохраняем…' : `Применить к ${selectedCount}`}
+        </button>
+      </div>
     </div>
   );
 }

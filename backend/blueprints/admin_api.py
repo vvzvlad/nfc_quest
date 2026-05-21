@@ -408,6 +408,69 @@ def create_tags_batch():
     return jsonify({"items": created}), 201
 
 
+# ---------------------------------------------------------------------------
+# Tags bulk operations
+# ---------------------------------------------------------------------------
+
+
+@admin_api.route("/tags/bulk_update", methods=["POST"])
+@_require_admin
+def bulk_update_tags():
+    """Update strategy and/or strategy_params for a list of tag IDs."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids", [])
+    # Validate: ids must be a non-empty list of strings, max 500
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "INVALID_IDS"}), 400
+    ids = [str(i) for i in ids[:500]]
+
+    # Validate strategy against known strategies if provided
+    if "strategy" in data and data["strategy"] not in STRATEGIES:
+        return jsonify({"error": "UNKNOWN_STRATEGY"}), 400
+
+    # Validate strategy_params is a dict if provided
+    if "strategy_params" in data and not isinstance(data.get("strategy_params"), dict):
+        return jsonify({"error": "INVALID_STRATEGY_PARAMS"}), 400
+
+    updated = 0
+    for tag_id in ids:
+        tag = db.session.get(Tag, tag_id)
+        if tag is None:
+            continue
+        if "strategy" in data:
+            tag.strategy = data["strategy"]
+        if "strategy_params" in data:
+            tag.strategy_params = data["strategy_params"]
+        updated += 1
+
+    db.session.commit()
+    return jsonify({"updated": updated}), 200
+
+
+@admin_api.route("/tags/bulk_delete", methods=["POST"])
+@_require_admin
+def bulk_delete_tags():
+    """Delete a list of tags by ID with proper FK cleanup."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids", [])
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "INVALID_IDS"}), 400
+    ids = [str(i) for i in ids[:500]]
+
+    deleted = 0
+    for tag_id in ids:
+        tag = db.session.get(Tag, tag_id)
+        if tag is None:
+            continue
+        db.session.query(TagPlayerScan).filter_by(tag_id=tag_id).delete()
+        db.session.query(ScanEvent).filter_by(tag_id=tag_id).update({"tag_id": None})
+        db.session.delete(tag)
+        deleted += 1
+
+    db.session.commit()
+    return jsonify({"deleted": deleted}), 200
+
+
 @admin_api.route("/tags/<tag_id>", methods=["PUT"])
 @_require_admin
 def update_tag(tag_id):
