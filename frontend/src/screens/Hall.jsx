@@ -260,6 +260,7 @@ function ScreenHallScoreboard() {
                   place={i + 1}
                   name={entry.nick}
                   score={entry.points}
+                  lastScanAt={entry.last_scan_at}
                 />
               ))}
             </div>
@@ -270,6 +271,7 @@ function ScreenHallScoreboard() {
                   place={i + 13}
                   name={entry.nick}
                   score={entry.points}
+                  lastScanAt={entry.last_scan_at}
                 />
               ))}
             </div>
@@ -378,8 +380,15 @@ function Stat({ label, value }) {
   );
 }
 
-function HallRow({ place, name, score }) {
+function HallRow({ place, name, score, lastScanAt }) {
   const medal = place === 1 ? 'var(--gold)' : place <= 4 ? 'var(--silver)' : place <= 15 ? 'var(--bronze)' : null;
+
+  // Compute elapsed ms and display minutes since last scan (updates on every parent re-render, every second)
+  const elapsedMs = lastScanAt ? Date.now() - new Date(lastScanAt).getTime() : null;
+  const minsAgo   = elapsedMs !== null ? Math.floor(elapsedMs / 60000) : null;
+  // Show label when elapsed time is strictly greater than 10 minutes (checked in ms to avoid floor() edge case)
+  const showInactive = elapsedMs !== null && elapsedMs > 10 * 60 * 1000;
+
   return (
     <div
       data-nick={name}
@@ -391,10 +400,16 @@ function HallRow({ place, name, score }) {
       }}
     >
       <div className="mono" style={{ fontSize: 13, color: medal ?? 'var(--muted)', fontWeight: 700 }}>{String(place).padStart(2,'0')}</div>
-      <div style={{
-        fontFamily: 'var(--font-mono)', fontSize: 15, color: 'var(--fg-2)',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
-      }}>{name}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div style={{
+          fontFamily: 'var(--font-mono)', fontSize: 15, color: 'var(--fg-2)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{name}</div>
+        {/* Always rendered to keep row height stable, preventing FLIP animation glitch when subtitle appears/disappears */}
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', marginTop: 1, visibility: showInactive ? 'visible' : 'hidden' }}>
+          активность {minsAgo ?? 0} мин. назад
+        </div>
+      </div>
       <div className="tabular" style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: 'var(--fg)' }}>{score}</div>
     </div>
   );

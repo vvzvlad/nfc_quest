@@ -3,6 +3,7 @@ import unicodedata
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, current_app
 from models import db, Player, Tag, ScanEvent, GameSettings, TagPlayerScan
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import joinedload
 from strategies import get_strategy
@@ -303,8 +304,24 @@ def scoreboard():
     now = datetime.now(timezone.utc)
 
     players = db.session.query(Player).order_by(Player.points.desc(), Player.registered_at.asc()).all()
+
+    # Build a map player_id -> latest successful scan timestamp
+    player_ids = [p.id for p in players]
+    last_scan_rows = (
+        db.session.query(ScanEvent.player_id, func.max(ScanEvent.scanned_at).label("last_scan"))
+        .filter(ScanEvent.player_id.in_(player_ids), ScanEvent.result == "ok")
+        .group_by(ScanEvent.player_id)
+        .all()
+    ) if player_ids else []
+    last_scan_map = {row.player_id: row.last_scan for row in last_scan_rows}
+
     players_data = [
-        {"rank": i + 1, "nick": p.nick, "points": p.points}
+        {
+            "rank": i + 1,
+            "nick": p.nick,
+            "points": p.points,
+            "last_scan_at": last_scan_map[p.id].strftime("%Y-%m-%dT%H:%M:%SZ") if p.id in last_scan_map else None,
+        }
         for i, p in enumerate(players)
     ]
 
