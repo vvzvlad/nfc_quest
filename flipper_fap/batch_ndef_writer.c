@@ -1,7 +1,7 @@
 #include <furi.h>
 #include <gui/gui.h>
 #include <gui/view_dispatcher.h>
-#include <gui/modules/popup.h>
+#include <gui/elements.h>
 #include <gui/modules/dialog_ex.h>
 #include <gui/modules/submenu.h>
 #include <gui/modules/file_browser.h>
@@ -19,7 +19,6 @@
 #include <nfc/protocols/nfc_protocol.h>
 #include <nfc/protocols/mf_ultralight/mf_ultralight.h>
 #include <nfc/protocols/mf_ultralight/mf_ultralight_poller_sync.h>
-
 #define APP_TAG "BatchNDEF"
 #define URLS_PATH APP_DATA_PATH("urls.txt")  // resolves to /ext/apps_data/batch_ndef_writer/urls.txt
 #define MAX_URLS 512
@@ -44,7 +43,7 @@ typedef enum {
     ViewIdMenu = 0,       // Submenu — main menu
     ViewIdFileBrowser,    // FileBrowser — file picker
     ViewIdSettings,       // VariableItemList — delay config
-    ViewIdPolling,        // Popup — waiting for tag
+    ViewIdPolling,        // View — waiting for tag (custom draw with button hints)
     ViewIdResult,         // DialogEx — error or done screen
 } ViewId;
 
@@ -68,7 +67,7 @@ typedef enum {
 typedef struct {
     Gui* gui;
     ViewDispatcher* view_dispatcher;
-    Popup* p_polling;
+    View* v_polling;
     DialogEx* d_result;
     NotificationApp* notifications;
 
@@ -90,9 +89,9 @@ typedef struct {
     volatile bool stop_request;
     volatile MfUltralightError last_err;
     char last_msg[64];    // written before volatile tag_present; DMB in scanner_cb ensures ordering
-    char popup_hdr[40];   // persistent storage for popup header string (popup holds pointer)
-    char url_preview[64]; // persistent storage for URL preview on polling screen (popup holds pointer)
-    char scan_result[128];// persistent storage for the URL read in Scan mode (popup holds pointer)
+    char popup_hdr[40];   // persistent storage for polling view header string (read by draw callback)
+    char url_preview[64]; // persistent storage for URL preview on polling screen (read by draw callback)
+    char scan_result[128];// persistent storage for the URL read in Scan mode (read by draw callback)
     volatile bool scan_ok;// true when the last scan read a valid URL (drives the green/vibro feedback)
 
     // Settings and state
@@ -102,7 +101,13 @@ typedef struct {
     bool at_menu;               // true when main menu is the active view
     bool show_done;             // true when showing "All done" in result dialog
     bool browser_running;       // true while FileBrowser is active (guards file_browser_stop calls)
+    volatile bool skip_pending;  // true when Right was pressed to skip current tag; checked in EvtCustomStoppedByUser
+    volatile bool in_write_mode; // true when polling view is in write mode (not scan mode)
 } App;
+
+// Module-level app pointer used by polling_input_cb.
+// Safe for FAP: each FAP runs as a single instance in its own process.
+static App* s_app = NULL;
 
 // --- Settings persistence ---
 
@@ -468,6 +473,7 @@ static int32_t worker_thread(void* ctx) {
 
 static void start_worker(App* app) {
     app->stop_request = false;
+    app->skip_pending = false;  // clear skip flag on every new write cycle
     app->worker = furi_thread_alloc_ex("ndef_worker", 4096, worker_thread, app);  // 4 KiB: sync NFC poller needs headroom
     furi_thread_start(app->worker);
 }
@@ -538,17 +544,87 @@ static int32_t scan_worker_thread(void* ctx) {
     return 0;
 }
 
-// Show the scan popup and start the scan worker loop
+// Force redraw of the polling view by committing its dummy model.
+static void polling_view_update(App* app) {
+    with_view_model(app->v_polling, uint8_t* dummy, { (*dummy)++; }, true);
+}
+
+// Draw callback for the polling view — renders header, body text, and (in write mode) button hints.
+static void polling_draw_cb(Canvas* canvas, void* model) {
+    (void)model;
+    App* app = s_app;
+    if(!app) return;
+
+    canvas_clear(canvas);
+    canvas_set_color(canvas, ColorBlack);
+
+    // Header line at top
+    canvas_set_font(canvas, FontPrimary);
+    canvas_draw_str_aligned(canvas, 64, 10, AlignCenter, AlignBottom, app->popup_hdr);
+
+    // Body text in the center area — multiline to handle long URLs and "\n" sequences
+    canvas_set_font(canvas, FontSecondary);
+    // Use url_preview in write mode, scan_result in scan mode
+    const char* body = app->in_write_mode ? app->url_preview : app->scan_result;
+    elements_multiline_text_aligned(canvas, 64, 32, AlignCenter, AlignCenter, body);
+
+    // Button hints — only in write mode
+    if(app->in_write_mode) {
+        elements_button_right(canvas, "Skip");
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str(canvas, 2, 63, "Hold Back");
+    }
+}
+
+// Show the scan view and start the scan worker loop
 static void show_scan_and_start(App* app) {
-    popup_reset(app->p_polling);
-    popup_set_header(app->p_polling, "Scanning", 64, 4, AlignCenter, AlignTop);
-    popup_set_text(app->p_polling, "Hold a tag\nto the back", 64, 30, AlignCenter, AlignCenter);
+    snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Scanning");
+    snprintf(app->scan_result, sizeof(app->scan_result), "Hold a tag to back");
     app->at_menu = false;
+    app->in_write_mode = false;
+    polling_view_update(app);
     view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
 
     app->stop_request = false;
     app->worker = furi_thread_alloc_ex("scan_worker", 4096, scan_worker_thread, app);
     furi_thread_start(app->worker);
+}
+
+// Input callback for the polling view — handles Right (skip) and Back long press (stop).
+// Only active in write mode; scan mode leaves all input to the default nav_cb.
+static bool polling_input_cb(InputEvent* event, void* ctx) {
+    (void)ctx;                            // context unused — App* comes from module-level s_app
+    App* app = s_app;
+    if(!app || !app->in_write_mode) return false; // scan mode or not yet initialized: default nav_cb handles Back
+
+    if(event->key == InputKeyRight && event->type == InputTypeShort) {
+        // Right short press — skip current tag
+        if(app->worker) {
+            app->skip_pending = true;
+            app->stop_request = true;
+        } else {
+            // No active worker (edge case), send skip event directly
+            view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomSkip);
+        }
+        return true; // consumed
+    }
+
+    if(event->key == InputKeyBack) {
+        if(event->type == InputTypeLong) {
+            // Long press Back — stop worker and return to menu
+            if(app->worker) {
+                app->stop_request = true;
+            } else {
+                view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomStoppedByUser);
+            }
+        }
+        // Consume ALL Back key events in write mode:
+        // short press does nothing (prevents nav_cb from firing),
+        // long press triggers stop above.
+        return true;
+    }
+
+    return false;
 }
 
 static void on_result(DialogExResult r, void* c) {
@@ -604,15 +680,14 @@ static void show_result_done(App* app) {
     view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdResult);
 }
 
-// Show the polling popup for the current URL index and start the worker
+// Show the polling view for the current URL index and start the worker
 static void show_polling_and_start(App* app) {
-    popup_reset(app->p_polling);
     snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Tag %zu/%zu", app->url_index + 1, app->url_count);
-    popup_set_header(app->p_polling, app->popup_hdr, 64, 4, AlignCenter, AlignTop);
-    // Show truncated URL being written (stored persistently since popup holds the pointer)
+    // Show truncated URL being written (stored persistently; draw callback holds pointer)
     snprintf(app->url_preview, sizeof(app->url_preview), "%.60s", app->urls[app->url_index]);
-    popup_set_text(app->p_polling, app->url_preview, 64, 28, AlignCenter, AlignCenter);
     app->at_menu = false;
+    app->in_write_mode = true;
+    polling_view_update(app);
     view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
     start_worker(app);
 }
@@ -638,6 +713,7 @@ static void on_menu_item(void* ctx, uint32_t index) {
 }
 
 static void show_menu(App* app) {
+    app->in_write_mode = false;  // safety reset: ensure write mode is cleared on menu return
     submenu_reset(app->menu);
     submenu_set_header(app->menu, "Batch NDEF Writer");
 
@@ -739,15 +815,13 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
     App* app = ctx;
     switch(event) {
     case EvtCustomMenuStart: {
-        // If no URLs loaded, show an error popup and stay (back returns to menu via nav_cb)
+        // If no URLs loaded, show an error view and stay (back returns to menu via nav_cb)
         if(app->url_count == 0) {
-            popup_reset(app->p_polling);
-            popup_set_header(app->p_polling, "No URLs loaded", 64, 4, AlignCenter, AlignTop);
-            popup_set_text(
-                app->p_polling,
-                "Select a urls.txt file\nusing 'Select File'",
-                64, 30, AlignCenter, AlignCenter);
+            snprintf(app->popup_hdr, sizeof(app->popup_hdr), "No URLs loaded");
+            snprintf(app->scan_result, sizeof(app->scan_result), "Select a urls.txt\nusing Select File");
+            app->in_write_mode = false;
             app->at_menu = false;
+            polling_view_update(app);
             view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
             return true;
         }
@@ -767,10 +841,9 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
         show_scan_and_start(app);
         return true;
     case EvtCustomScanResult:
-        // Worker read a tag — refresh the popup. scan_result persists (app field),
-        // so the popup can safely hold a pointer to it.
-        popup_set_header(app->p_polling, "Scan result", 64, 4, AlignCenter, AlignTop);
-        popup_set_text(app->p_polling, app->scan_result, 64, 32, AlignCenter, AlignCenter);
+        // Worker read a tag — update fields and redraw. scan_result is already set by worker.
+        snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Scan result");
+        polling_view_update(app);
         // Vibrate and flash green only when a valid URL was read
         if(app->scan_ok) {
             notification_message(app->notifications, &sequence_scan_ok);
@@ -778,8 +851,9 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
         return true;
     case EvtCustomScanReady:
         // Result shown long enough — reset to the ready screen for the next tag
-        popup_set_header(app->p_polling, "Scanning", 64, 4, AlignCenter, AlignTop);
-        popup_set_text(app->p_polling, "Hold a tag\nto the back", 64, 30, AlignCenter, AlignCenter);
+        snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Scanning");
+        snprintf(app->scan_result, sizeof(app->scan_result), "Hold a tag to back");
+        polling_view_update(app);
         return true;
     case EvtCustomFilePicked:
         // Stop the browser here (safe: we're in the main event loop, not inside the browser callback)
@@ -831,9 +905,19 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
         show_menu(app);
         return true;
     case EvtCustomStoppedByUser:
-        // Worker was stopped by Back button press — return to menu, do NOT quit app
+        // Worker stopped — either by Back (go to menu) or by Right skip (advance to next tag)
         join_worker(app);
-        show_menu(app);
+        if(app->skip_pending) {
+            app->skip_pending = false;
+            app->url_index++;
+            if(app->url_index >= app->url_count) {
+                show_result_done(app);
+            } else {
+                show_polling_and_start(app);
+            }
+        } else {
+            show_menu(app);
+        }
         return true;
     case EvtCustomAbort:
         // Quit the entire application
@@ -904,7 +988,12 @@ int32_t batch_ndef_writer_app(void* p) {
     view_dispatcher_set_navigation_event_callback(app->view_dispatcher, nav_cb);
 
     // Allocate GUI modules
-    app->p_polling = popup_alloc();
+    // Allocate the custom polling view; s_app must be set before registering callbacks.
+    app->v_polling = view_alloc();
+    view_allocate_model(app->v_polling, ViewModelTypeLockFree, sizeof(uint8_t));
+    s_app = app;
+    view_set_draw_callback(app->v_polling, polling_draw_cb);
+    view_set_input_callback(app->v_polling, polling_input_cb);
     app->d_result = dialog_ex_alloc();
     app->menu = submenu_alloc();
     app->browser_result = furi_string_alloc();
@@ -919,7 +1008,7 @@ int32_t batch_ndef_writer_app(void* p) {
     view_dispatcher_add_view(
         app->view_dispatcher, ViewIdSettings, variable_item_list_get_view(app->settings_list));
     view_dispatcher_add_view(
-        app->view_dispatcher, ViewIdPolling, popup_get_view(app->p_polling));
+        app->view_dispatcher, ViewIdPolling, app->v_polling);
     view_dispatcher_add_view(
         app->view_dispatcher, ViewIdResult, dialog_ex_get_view(app->d_result));
 
@@ -947,7 +1036,7 @@ int32_t batch_ndef_writer_app(void* p) {
     file_browser_free(app->file_browser);
     furi_string_free(app->browser_result);
     variable_item_list_free(app->settings_list);
-    popup_free(app->p_polling);
+    view_free(app->v_polling);
     dialog_ex_free(app->d_result);
     view_dispatcher_free(app->view_dispatcher);
 
