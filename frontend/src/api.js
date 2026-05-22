@@ -157,18 +157,18 @@ export const adminApi = {
 let _socket = null;
 
 export function connectSocket(onUpdate) {
-  // Dynamically import socket.io-client to avoid bundling it at startup
+  let cancelled = false;
   import('socket.io-client').then(({ io }) => {
+    if (cancelled) return; // effect already cleaned up before import resolved
     if (_socket) {
       _socket.off('scoreboard_update');
       _socket.disconnect();
     }
     _socket = io(BASE || window.location.origin, { withCredentials: true });
     _socket.on('scoreboard_update', onUpdate);
-    _socket.on('connect', () => {
-      // Server sends current scoreboard on connect
-    });
   });
+  // Return cancel function so callers can abort before or after socket is ready
+  return () => { cancelled = true; disconnectSocket(); };
 }
 
 export function disconnectSocket() {

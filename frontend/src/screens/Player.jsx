@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QuestCtx } from '../QuestContext.js';
-import { connectSocket, disconnectSocket, getLocalPlayer, api } from '../api.js';
+import { connectSocket, getLocalPlayer, api } from '../api.js';
 import { getErrorMessage } from '../i18n.js';
 
 // screens/Player.jsx — Player flow (mobile)
@@ -673,12 +673,12 @@ function ScreenScoreboardMobile({ initialData }) {
 
   // Connect WebSocket for live scoreboard updates
   React.useEffect(() => {
-    connectSocket((update) => {
+    const cancel = connectSocket((update) => {
       // update expected shape: { players, game }
       if (update?.players) setScoreboard(update.players);
       if (update?.game) setGameInfo(update.game);
     });
-    return () => disconnectSocket();
+    return cancel;
   }, []);
 
   // Client-side countdown timer tick

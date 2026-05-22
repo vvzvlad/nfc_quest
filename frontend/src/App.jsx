@@ -1,7 +1,7 @@
 import React from 'react';
 import { Routes, Route, useNavigate, useParams, Outlet, Navigate } from 'react-router-dom';
 import { QuestCtx } from './QuestContext.js';
-import { getLocalPlayer, setLocalPlayer, clearLocalPlayer, api, adminApi } from './api.js';
+import { getLocalPlayer, setLocalPlayer, clearLocalPlayer, api, adminApi, connectSocket } from './api.js';
 import { getErrorMessage } from './i18n.js';
 import {
   QuestHeader,
@@ -175,6 +175,8 @@ function PlayerPage() {
   const [registrationError, setRegistrationError] = React.useState(null);
   const [scanResult, setScanResult] = React.useState(null);
   const [scoreboardData, setScoreboardData] = React.useState(null);
+  // Tracks whether a WS scoreboard_update was received; prevents stale HTTP from overwriting it
+  const wsReceivedRef = React.useRef(false);
 
   // On mount: decide whether to show registration or go straight to scanning.
   // If we already scanned this tag in this browser tab, show cached result
@@ -192,23 +194,33 @@ function PlayerPage() {
     if (cached) {
       try {
         const { scanData, boardData } = JSON.parse(cached);
-        setScanResult(scanData);
-        setScoreboardData(boardData);
-        setPhase('result');
-        // Validate player is still active and refresh scoreboard in background
-        api.scoreboard().then(r => {
-          if (r.ok) {
-            setScoreboardData(r.data);
-            // If player no longer appears in scoreboard, they were deleted — reset session
-            const stillExists = r.data.players?.some(p => p.nick === player.nick);
-            if (!stillExists) {
-              clearLocalPlayer();
-              sessionStorage.removeItem('scan_result_' + tagId);
-              setPhase('registration');
+        // Guard: cached non-terminal results (e.g. not_yet written by old code) must not be replayed
+        if (!['ok', 'locked'].includes(scanData.status)) {
+          sessionStorage.removeItem('scan_result_' + tagId);
+          // Fall through to fresh scan — do NOT return here, do NOT setPhase
+        } else {
+          wsReceivedRef.current = false; // reset flag so HTTP response is not suppressed in cache-hit path
+          setScanResult(scanData);
+          setScoreboardData(boardData);
+          setPhase('result');
+          // Validate player is still active and refresh scoreboard in background
+          api.scoreboard().then(r => {
+            if (r.ok) {
+              // Only update scoreboard from HTTP if WebSocket hasn't already delivered fresher data
+              if (!wsReceivedRef.current) {
+                setScoreboardData(prev => ({ ...prev, ...r.data }));
+              }
+              // Always check if the player still exists, regardless of scoreboard update
+              const stillExists = r.data.players?.some(p => p.nick === player.nick);
+              if (!stillExists) {
+                clearLocalPlayer();
+                sessionStorage.removeItem('scan_result_' + tagId);
+                setPhase('registration');
+              }
             }
-          }
-        });
-        return;
+          });
+          return;
+        }
       } catch { /* corrupted cache — fall through to fresh scan */ }
     }
 
@@ -219,6 +231,7 @@ function PlayerPage() {
   // Calls scan API and transitions to 'result' (or 'error').
   async function doScan(tag_id, player_id) {
     setPhase('scanning');
+    wsReceivedRef.current = false; // reset flag for fresh scan
     try {
       const scanRes = await api.scan(tag_id, player_id);
 
@@ -242,17 +255,37 @@ function PlayerPage() {
         setScoreboardData(boardRes.data);
       }
 
-      // Cache scan result so refresh doesn't re-POST
-      sessionStorage.setItem('scan_result_' + tag_id, JSON.stringify({
-        scanData,
-        boardData: boardRes.ok ? boardRes.data : null,
-      }));
+      // Only cache terminal outcomes — 'ok' and 'locked' are permanent per-tag;
+      // transient states like 'not_yet' or 'rate_limit' must not be cached.
+      const cacheableStatuses = ['ok', 'locked'];
+      if (cacheableStatuses.includes(scanData.status)) {
+        sessionStorage.setItem('scan_result_' + tag_id, JSON.stringify({
+          scanData,
+          boardData: boardRes.ok ? boardRes.data : null,
+        }));
+      }
 
       setPhase('result');
     } catch (err) {
       setPhase('error');
     }
   }
+
+  // Connect WebSocket for live scoreboard updates while showing scan result
+  React.useEffect(() => {
+    if (phase !== 'result') return;
+    const cancel = connectSocket((update) => {
+      wsReceivedRef.current = true; // mark that WS has delivered data
+      if (update?.players || update?.game) {
+        setScoreboardData(prev => ({
+          ...prev,
+          ...(update.players ? { players: update.players } : {}),
+          ...(update.game ? { game: update.game } : {}),
+        }));
+      }
+    });
+    return cancel;
+  }, [phase]);
 
   function buildBoardSlice(players, myNick) {
     if (!players || players.length === 0) return null;

@@ -1,7 +1,7 @@
 import React from 'react';
 import { QuestCtx } from '../QuestContext.js';
 import { CornerBrackets } from './Player.jsx';
-import { connectSocket, disconnectSocket, api } from '../api.js';
+import { connectSocket, api } from '../api.js';
 
 // Hall.jsx — Hall scoreboard (1920x1080 big screen)
 // Designed for projection / 50" TV in a hallway. High contrast, no chrome.
@@ -30,13 +30,13 @@ function ScreenHallScoreboard() {
 
   // WebSocket connection for live updates
   React.useEffect(() => {
-    connectSocket((data) => {
+    const cancel = connectSocket((data) => {
       setPlayers(data.players || []);
       setGameInfo(data.game || null);
       setStats(data.stats || {});
       if (data.recent_scans) setRecentScans(data.recent_scans);
     });
-    return () => disconnectSocket();
+    return cancel;
   }, []);
 
   // Timer effect: updates current wall clock and countdown from gameInfo
