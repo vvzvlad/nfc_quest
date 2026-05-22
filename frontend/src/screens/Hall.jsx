@@ -23,6 +23,9 @@ function ScreenHallScoreboard() {
   const [animatedScores, setAnimatedScores] = React.useState({});  // nick -> currently displayed (animated) score
   const animatedScoresRef = React.useRef({});                       // mirror of animatedScores for stale-closure-free reads in useLayoutEffect
   const animatingRef = React.useRef({});                            // nick -> active interval id for score counting
+  const flipTimeoutsRef = React.useRef({});                         // nick -> pending setTimeout id for FLIP (fires after counting ends)
+
+  const [tickKeys, setTickKeys] = React.useState({});               // nick -> tick counter (increments each tick, triggers pop in HallRow)
 
   // Updates animated score in both state (for rendering) and ref (for stale-closure-free reads)
   const setAnimated = React.useCallback((nick, value) => {
@@ -53,10 +56,11 @@ function ScreenHallScoreboard() {
     return cancel;
   }, []);
 
-  // Cleanup all score-counting intervals on unmount
+  // Cleanup all score-counting intervals and pending FLIP timeouts on unmount
   React.useEffect(() => {
     return () => {
       Object.values(animatingRef.current).forEach(id => clearInterval(id));
+      Object.values(flipTimeoutsRef.current).forEach(id => clearTimeout(id));
     };
   }, []);
 
@@ -113,6 +117,10 @@ function ScreenHallScoreboard() {
     if (!boardRef.current) return;
     const elements = boardRef.current.querySelectorAll('[data-nick]');
 
+    // Cancel pending FLIP timeouts — new update supersedes them
+    Object.entries(flipTimeoutsRef.current).forEach(([, id]) => clearTimeout(id));
+    flipTimeoutsRef.current = {};
+
     // Read current visual positions BEFORE cancelling (getBoundingClientRect includes active transforms)
     const visualRects = {};
     elements.forEach(el => {
@@ -161,46 +169,76 @@ function ScreenHallScoreboard() {
       const prevNum = prevScore !== undefined ? Number(prevScore) : null;
       const curNum  = curScore  !== undefined ? Number(curScore)  : null;
       const scoreChanged = prevNum !== null && curNum !== null && prevNum !== curNum;
-      // flipDelay is computed inside if (scoreChanged) based on startTicks
-      let flipDelay = 0;
 
-      // Score changed: start counting animation and delay FLIP
+      // Score changed: start counting animation; FLIP fires via setTimeout after counting ends
       if (scoreChanged) {
         const delta = curNum - prevNum;
 
-        // Cancel any in-progress counting for this nick
+        // Cancel any in-progress counting interval for this nick
         if (animatingRef.current[nick]) {
           clearInterval(animatingRef.current[nick]);
           delete animatingRef.current[nick];
         }
 
+        // Cancel any pending FLIP timeout for this nick (already cancelled above, but be safe)
+        if (flipTimeoutsRef.current[nick]) {
+          clearTimeout(flipTimeoutsRef.current[nick]);
+          delete flipTimeoutsRef.current[nick];
+        }
+
         // Start from currently displayed animated value (not real prev score) to avoid jump on rapid updates
-        const startValue = animatedScoresRef.current[nick] ?? prevNum;
-        const startDelta = curNum - startValue;
+        const startValue    = animatedScoresRef.current[nick] ?? prevNum;
+        const startDelta    = curNum - startValue;
         const absStartDelta = Math.abs(startDelta);
-        const startTicks = absStartDelta > 0 ? Math.min(Math.ceil(absStartDelta / 10), 10) : 0;
+        const startTicks    = absStartDelta > 0 ? Math.min(Math.ceil(absStartDelta / 5), 20) : 0;
         const startStepSize = startDelta > 0
           ? Math.ceil(absStartDelta / Math.max(startTicks, 1))
           : -Math.ceil(absStartDelta / Math.max(startTicks, 1));
 
-        // FLIP delay matches actual counting duration so row moves only after score finishes ticking
-        flipDelay = startTicks * 200;
+        // Capture FLIP rects now (DOM positions won't be available later inside the interval)
+        const capturedPrevRect = prevRect;
+        const capturedNewRect  = newRect;
 
         if (startTicks > 0) {
           // Seed display at the current animated value (smooth continuation if interrupted)
           setAnimated(nick, startValue);
-          // Tick every 200 ms toward curNum
+
+          // Tick every 100 ms toward curNum; also trigger per-tick pop animation in HallRow
           let ticksDone = 0;
           const intervalId = setInterval(() => {
             ticksDone++;
             const isLast = ticksDone >= startTicks;
             const next   = isLast ? curNum : Math.round(startValue + startStepSize * ticksDone);
             setAnimated(nick, next);
+            // Increment tickKey so HallRow plays the pop animation
+            setTickKeys(prev => ({ ...prev, [nick]: (prev[nick] ?? 0) + 1 }));
             if (isLast) {
               clearInterval(intervalId);
               delete animatingRef.current[nick];
+              // Trigger FLIP now that counting is done
+              if (capturedPrevRect && capturedNewRect) {
+                const dx = capturedPrevRect.left - capturedNewRect.left;
+                const dy = capturedPrevRect.top  - capturedNewRect.top;
+                if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+                  // Small timeout to let React flush the final score render before animating
+                  const tid = setTimeout(() => {
+                    delete flipTimeoutsRef.current[nick];
+                    const domEl = document.querySelector(`[data-nick="${CSS.escape(nick)}"]`);
+                    if (domEl) {
+                      domEl.animate(
+                        [
+                          { transform: `translate(${dx}px, ${dy}px)` },
+                          { transform: 'translate(0, 0)' },
+                        ],
+                        { duration: 600, easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)' }
+                      );
+                    }
+                  }, 16);  // one frame delay after last tick render
+                  flipTimeoutsRef.current[nick] = tid;
+                }
+              }
             }
-          }, 200);
+          }, 100);
           animatingRef.current[nick] = intervalId;
         }
 
@@ -217,23 +255,18 @@ function ScreenHallScoreboard() {
         }
       }
 
-      // FLIP: slide element from its old screen position to the new one,
-      // delayed by counting duration so the row moves only after score finishes ticking
-      if (prevRect && newRect) {
+      // FLIP for elements whose score did NOT change — fire immediately as usual
+      // (for elements whose score changed, FLIP is deferred via setTimeout inside the interval above)
+      if (!scoreChanged && prevRect && newRect) {
         const dx = prevRect.left - newRect.left;
         const dy = prevRect.top  - newRect.top;
         if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
           el.animate(
             [
               { transform: `translate(${dx}px, ${dy}px)` },
-              { transform: 'translate(0px, 0px)' },
+              { transform: 'translate(0, 0)' },
             ],
-            {
-              duration: 600,
-              delay: flipDelay,
-              fill: 'backwards',   // hold first keyframe during delay
-              easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-            }
+            { duration: 600, easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)' }
           );
         }
       }
@@ -373,6 +406,7 @@ function ScreenHallScoreboard() {
                   score={animatedScores[entry.nick] ?? entry.points}
                   realScore={entry.points}
                   lastScanAt={entry.last_scan_at}
+                  tickKey={tickKeys[entry.nick] ?? 0}
                 />
               ))}
             </div>
@@ -385,6 +419,7 @@ function ScreenHallScoreboard() {
                   score={animatedScores[entry.nick] ?? entry.points}
                   realScore={entry.points}
                   lastScanAt={entry.last_scan_at}
+                  tickKey={tickKeys[entry.nick] ?? 0}
                 />
               ))}
             </div>
@@ -493,14 +528,28 @@ function Stat({ label, value }) {
   );
 }
 
-function HallRow({ place, name, score, realScore, lastScanAt }) {
+function HallRow({ place, name, score, realScore, lastScanAt, tickKey }) {
   const medal = place === 1 ? 'var(--gold)' : place <= 4 ? 'var(--silver)' : place <= 15 ? 'var(--bronze)' : null;
 
-  // Compute elapsed ms and display minutes since last scan (updates on every parent re-render, every second)
-  const elapsedMs = lastScanAt ? Date.now() - new Date(lastScanAt).getTime() : null;
-  const minsAgo   = elapsedMs !== null ? Math.floor(elapsedMs / 60000) : null;
-  // Show label when elapsed time is strictly greater than 10 minutes (checked in ms to avoid floor() edge case)
+  const elapsedMs    = lastScanAt ? Date.now() - new Date(lastScanAt).getTime() : null;
+  const minsAgo      = elapsedMs !== null ? Math.floor(elapsedMs / 60000) : null;
   const showInactive = elapsedMs !== null && elapsedMs > 10 * 60 * 1000;
+
+  // Ref for the score cell — used to trigger the per-tick pop animation
+  const scoreRef = React.useRef(null);
+
+  // Play a scale-up pop on each tick (tickKey increments every 100 ms during counting)
+  React.useEffect(() => {
+    if (!tickKey || !scoreRef.current) return;
+    scoreRef.current.animate(
+      [
+        { transform: 'scale(1)',   color: 'var(--fg)' },
+        { transform: 'scale(1.9)', color: 'var(--success)', offset: 0.35 },
+        { transform: 'scale(1)',   color: 'var(--fg)' },
+      ],
+      { duration: 80, easing: 'ease-out' }
+    );
+  }, [tickKey]);
 
   return (
     <div
@@ -510,24 +559,30 @@ function HallRow({ place, name, score, realScore, lastScanAt }) {
         display: 'grid', gridTemplateColumns: '40px 1fr auto',
         alignItems: 'center', padding: '7px 6px',
         borderBottom: '1px solid var(--line)',
+        overflow: 'visible',   // allow score pop to overflow row borders
       }}
     >
       <div className="mono" style={{ fontSize: 13, color: medal ?? 'var(--muted)', fontWeight: 700 }}>{String(place).padStart(2,'0')}</div>
-      {/* Name cell: name on the left, inactivity badge on the right (inline, no height change) */}
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', minWidth: 0, gap: 6 }}>
         <div style={{
           fontFamily: 'var(--font-mono)', fontSize: 15, color: 'var(--fg-2)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           flexShrink: 1, minWidth: 0,
         }}>{name}</div>
-        {/* Shown only when inactive >10 min; placed right of the name in the same row */}
         {showInactive && (
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>
             {minsAgo} мин. назад
           </div>
         )}
       </div>
-      <div className="tabular" style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: 'var(--fg)' }}>{score}</div>
+      <div
+        ref={scoreRef}
+        className="tabular"
+        style={{
+          fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: 'var(--fg)',
+          display: 'inline-block',   // needed so transform scale works correctly on inline text
+        }}
+      >{score}</div>
     </div>
   );
 }
