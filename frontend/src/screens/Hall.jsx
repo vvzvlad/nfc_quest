@@ -20,6 +20,9 @@ function ScreenHallScoreboard() {
   const prevRectsRef = React.useRef({});     // nick -> DOMRect from previous render
   const prevScoresRef = React.useRef({});    // nick -> score string from previous render
 
+  const [animatedScores, setAnimatedScores] = React.useState({});  // nick -> currently displayed (animated) score
+  const animatingRef = React.useRef({});                            // nick -> active interval id for score counting
+
   // Initial load on mount
   React.useEffect(() => {
     api.scoreboard().then(r => {
@@ -92,7 +95,7 @@ function ScreenHallScoreboard() {
       newScores[nick] = el.dataset.score;
     });
 
-    // For each element, apply FLIP if it moved, and a score flash if score increased
+    // For each element, apply FLIP if it moved, and a score counting animation if score changed
     elements.forEach(el => {
       const nick = el.dataset.nick;
       // Determine if this element was mid-animation when the update arrived:
@@ -108,31 +111,75 @@ function ScreenHallScoreboard() {
       const prevScore = prevScoresRef.current[nick];
       const curScore = newScores[nick];
 
-      // FLIP: slide element from its old screen position to the new one
+      // Compute score change metadata used by both counting and FLIP delay
+      const prevNum = prevScore !== undefined ? Number(prevScore) : null;
+      const curNum  = curScore  !== undefined ? Number(curScore)  : null;
+      const scoreChanged = prevNum !== null && curNum !== null && prevNum !== curNum;
+      const absDelta = scoreChanged ? Math.abs(curNum - prevNum) : 0;
+      const numTicks = scoreChanged ? Math.min(Math.ceil(absDelta / 10), 10) : 0;
+      const flipDelay = scoreChanged ? numTicks * 200 : 0;
+
+      // Score changed: start counting animation and delay FLIP
+      if (scoreChanged) {
+        const delta    = curNum - prevNum;
+        const stepSize = delta > 0
+          ? Math.ceil(absDelta / numTicks)
+          : -Math.ceil(absDelta / numTicks);
+
+        // Cancel any in-progress counting for this nick
+        if (animatingRef.current[nick]) {
+          clearInterval(animatingRef.current[nick]);
+        }
+
+        // Seed display at the OLD score so counting starts from there
+        setAnimatedScores(prev => ({ ...prev, [nick]: prevNum }));
+
+        // Tick every 200 ms toward curNum
+        let ticksDone = 0;
+        const intervalId = setInterval(() => {
+          ticksDone++;
+          const isLast = ticksDone >= numTicks;
+          const next   = isLast ? curNum : Math.round(prevNum + stepSize * ticksDone);
+          setAnimatedScores(prev => ({ ...prev, [nick]: next }));
+          if (isLast) {
+            clearInterval(intervalId);
+            delete animatingRef.current[nick];
+          }
+        }, 200);
+        animatingRef.current[nick] = intervalId;
+
+        // Green background flash when score increases (keep existing behaviour)
+        if (delta > 0) {
+          el.animate(
+            [
+              { backgroundColor: 'rgba(108,208,122,0.18)' },
+              { backgroundColor: 'rgba(108,208,122,0.18)', offset: 0.12 },
+              { backgroundColor: 'transparent' },
+            ],
+            { duration: 1600, easing: 'ease-out' }
+          );
+        }
+      }
+
+      // FLIP: slide element from its old screen position to the new one,
+      // delayed by counting duration so the row moves only after score finishes ticking
       if (prevRect && newRect) {
         const dx = prevRect.left - newRect.left;
-        const dy = prevRect.top - newRect.top;
+        const dy = prevRect.top  - newRect.top;
         if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
           el.animate(
             [
               { transform: `translate(${dx}px, ${dy}px)` },
               { transform: 'translate(0px, 0px)' },
             ],
-            { duration: 600, easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)' }
+            {
+              duration: 600,
+              delay: flipDelay,
+              fill: 'backwards',   // hold first keyframe during delay
+              easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+            }
           );
         }
-      }
-
-      // Score flash: green background pulse when score increases
-      if (prevScore !== undefined && curScore !== undefined && Number(curScore) > Number(prevScore)) {
-        el.animate(
-          [
-            { backgroundColor: 'rgba(108,208,122,0.18)' },
-            { backgroundColor: 'rgba(108,208,122,0.18)', offset: 0.12 },
-            { backgroundColor: 'transparent' },
-          ],
-          { duration: 1600, easing: 'ease-out' }
-        );
       }
     });
 
@@ -259,7 +306,8 @@ function ScreenHallScoreboard() {
                   key={entry.nick ?? i}
                   place={i + 1}
                   name={entry.nick}
-                  score={entry.points}
+                  score={animatedScores[entry.nick] ?? entry.points}
+                  realScore={entry.points}
                   lastScanAt={entry.last_scan_at}
                 />
               ))}
@@ -270,7 +318,8 @@ function ScreenHallScoreboard() {
                   key={entry.nick ?? i}
                   place={i + 13}
                   name={entry.nick}
-                  score={entry.points}
+                  score={animatedScores[entry.nick] ?? entry.points}
+                  realScore={entry.points}
                   lastScanAt={entry.last_scan_at}
                 />
               ))}
@@ -380,7 +429,7 @@ function Stat({ label, value }) {
   );
 }
 
-function HallRow({ place, name, score, lastScanAt }) {
+function HallRow({ place, name, score, realScore, lastScanAt }) {
   const medal = place === 1 ? 'var(--gold)' : place <= 4 ? 'var(--silver)' : place <= 15 ? 'var(--bronze)' : null;
 
   // Compute elapsed ms and display minutes since last scan (updates on every parent re-render, every second)
@@ -392,7 +441,7 @@ function HallRow({ place, name, score, lastScanAt }) {
   return (
     <div
       data-nick={name}
-      data-score={score}
+      data-score={realScore ?? score}
       style={{
         display: 'grid', gridTemplateColumns: '40px 1fr auto',
         alignItems: 'center', padding: '7px 6px',
@@ -400,15 +449,19 @@ function HallRow({ place, name, score, lastScanAt }) {
       }}
     >
       <div className="mono" style={{ fontSize: 13, color: medal ?? 'var(--muted)', fontWeight: 700 }}>{String(place).padStart(2,'0')}</div>
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      {/* Name cell: name on the left, inactivity badge on the right (inline, no height change) */}
+      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', minWidth: 0, gap: 6 }}>
         <div style={{
           fontFamily: 'var(--font-mono)', fontSize: 15, color: 'var(--fg-2)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          flexShrink: 1, minWidth: 0,
         }}>{name}</div>
-        {/* Always rendered to keep row height stable, preventing FLIP animation glitch when subtitle appears/disappears */}
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', marginTop: 1, visibility: showInactive ? 'visible' : 'hidden' }}>
-          активность {minsAgo ?? 0} мин. назад
-        </div>
+        {/* Shown only when inactive >10 min; placed right of the name in the same row */}
+        {showInactive && (
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            {minsAgo} мин. назад
+          </div>
+        )}
       </div>
       <div className="tabular" style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: 'var(--fg)' }}>{score}</div>
     </div>
