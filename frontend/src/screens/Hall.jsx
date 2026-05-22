@@ -293,16 +293,16 @@ function HallRow({ place, name, score }) {
   const medal = place === 1 ? 'var(--gold)' : place <= 4 ? 'var(--silver)' : place <= 15 ? 'var(--bronze)' : null;
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '48px 1fr auto',
-      alignItems: 'center', padding: '10px 6px',
+      display: 'grid', gridTemplateColumns: '40px 1fr auto',
+      alignItems: 'center', padding: '7px 6px',
       borderBottom: '1px solid var(--line)',
     }}>
-      <div className="mono" style={{ fontSize: 16, color: medal ?? 'var(--muted)', fontWeight: 700 }}>{String(place).padStart(2,'0')}</div>
+      <div className="mono" style={{ fontSize: 13, color: medal ?? 'var(--muted)', fontWeight: 700 }}>{String(place).padStart(2,'0')}</div>
       <div style={{
-        fontFamily: 'var(--font-mono)', fontSize: 18, color: 'var(--fg-2)',
+        fontFamily: 'var(--font-mono)', fontSize: 15, color: 'var(--fg-2)',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
       }}>{name}</div>
-      <div className="tabular" style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: 'var(--fg)' }}>{score}</div>
+      <div className="tabular" style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: 'var(--fg)' }}>{score}</div>
     </div>
   );
 }
