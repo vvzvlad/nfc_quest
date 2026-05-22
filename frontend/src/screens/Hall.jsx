@@ -16,6 +16,10 @@ function ScreenHallScoreboard() {
   const [currentTime, setCurrentTime] = React.useState('');
   const [recentScans, setRecentScans] = React.useState([]); // for ticker in footer
 
+  const boardRef = React.useRef(null);       // ref to the two-column grid container
+  const prevRectsRef = React.useRef({});     // nick -> DOMRect from previous render
+  const prevScoresRef = React.useRef({});    // nick -> score string from previous render
+
   // Initial load on mount
   React.useEffect(() => {
     api.scoreboard().then(r => {
@@ -62,6 +66,80 @@ function ScreenHallScoreboard() {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [gameInfo]);
+
+  // FLIP animation: animates rows to their new positions when players list changes
+  React.useLayoutEffect(() => {
+    if (!boardRef.current) return;
+    const elements = boardRef.current.querySelectorAll('[data-nick]');
+
+    // Read current visual positions BEFORE cancelling (getBoundingClientRect includes active transforms)
+    const visualRects = {};
+    elements.forEach(el => {
+      visualRects[el.dataset.nick] = el.getBoundingClientRect();
+    });
+
+    // Cancel in-progress animations — elements snap to their final DOM positions
+    elements.forEach(el => {
+      el.getAnimations().forEach(anim => anim.cancel());
+    });
+
+    // Read final (post-cancel) positions and scores from the DOM
+    const newRects = {};
+    const newScores = {};
+    elements.forEach(el => {
+      const nick = el.dataset.nick;
+      newRects[nick] = el.getBoundingClientRect();
+      newScores[nick] = el.dataset.score;
+    });
+
+    // For each element, apply FLIP if it moved, and a score flash if score increased
+    elements.forEach(el => {
+      const nick = el.dataset.nick;
+      // Determine if this element was mid-animation when the update arrived:
+      // if visualRects (pre-cancel) differs from newRects (post-cancel), a transform was active.
+      const wasAnimating =
+        visualRects[nick] && newRects[nick] &&
+        (Math.abs(visualRects[nick].left - newRects[nick].left) > 1 ||
+         Math.abs(visualRects[nick].top  - newRects[nick].top)  > 1);
+      // If mid-animation: start FLIP from current visual position (avoids jump on rapid updates).
+      // Otherwise: start from the stored position of the previous render (normal FLIP path).
+      const prevRect = wasAnimating ? visualRects[nick] : prevRectsRef.current[nick];
+      const newRect = newRects[nick];
+      const prevScore = prevScoresRef.current[nick];
+      const curScore = newScores[nick];
+
+      // FLIP: slide element from its old screen position to the new one
+      if (prevRect && newRect) {
+        const dx = prevRect.left - newRect.left;
+        const dy = prevRect.top - newRect.top;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+          el.animate(
+            [
+              { transform: `translate(${dx}px, ${dy}px)` },
+              { transform: 'translate(0px, 0px)' },
+            ],
+            { duration: 600, easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)' }
+          );
+        }
+      }
+
+      // Score flash: green background pulse when score increases
+      if (prevScore !== undefined && curScore !== undefined && Number(curScore) > Number(prevScore)) {
+        el.animate(
+          [
+            { backgroundColor: 'rgba(108,208,122,0.18)' },
+            { backgroundColor: 'rgba(108,208,122,0.18)', offset: 0.12 },
+            { backgroundColor: 'transparent' },
+          ],
+          { duration: 1600, easing: 'ease-out' }
+        );
+      }
+    });
+
+    // Save current positions and scores for the next update
+    prevRectsRef.current = newRects;
+    prevScoresRef.current = newScores;
+  }, [players]);
 
   const left = players.slice(0, 12);
   const right = players.slice(12, 24);
@@ -174,7 +252,7 @@ function ScreenHallScoreboard() {
             <div className="brak" style={{ fontSize: 14 }}>таблица лидеров</div>
             <div className="mono" style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: '0.1em' }}>обновление · ~ 2 сек</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+          <div ref={boardRef} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
             <div>
               {left.map((entry, i) => (
                 <HallRow
@@ -225,7 +303,7 @@ function ScreenHallScoreboard() {
                 ? Math.max(0, Math.round((Date.now() - new Date(scan.scanned_at).getTime()) / 1000))
                 : null;
               return (
-                <React.Fragment key={scan.nick + (scan.scanned_at || String(i))}>
+                <React.Fragment key={scan.nick + '_' + (scan.scanned_at ?? '') + '_' + i}>
                   {i > 0 && <span style={{ color: 'var(--muted-2)' }}>·</span>}
                   <span>
                     <b style={{ color: 'var(--fg)' }}>{scan.nick}</b>
@@ -303,11 +381,15 @@ function Stat({ label, value }) {
 function HallRow({ place, name, score }) {
   const medal = place === 1 ? 'var(--gold)' : place <= 4 ? 'var(--silver)' : place <= 15 ? 'var(--bronze)' : null;
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '40px 1fr auto',
-      alignItems: 'center', padding: '7px 6px',
-      borderBottom: '1px solid var(--line)',
-    }}>
+    <div
+      data-nick={name}
+      data-score={score}
+      style={{
+        display: 'grid', gridTemplateColumns: '40px 1fr auto',
+        alignItems: 'center', padding: '7px 6px',
+        borderBottom: '1px solid var(--line)',
+      }}
+    >
       <div className="mono" style={{ fontSize: 13, color: medal ?? 'var(--muted)', fontWeight: 700 }}>{String(place).padStart(2,'0')}</div>
       <div style={{
         fontFamily: 'var(--font-mono)', fontSize: 15, color: 'var(--fg-2)',
