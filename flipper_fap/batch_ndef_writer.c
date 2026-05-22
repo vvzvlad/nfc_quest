@@ -1,7 +1,6 @@
 #include <furi.h>
 #include <gui/gui.h>
 #include <gui/view_dispatcher.h>
-#include <gui/modules/widget.h>
 #include <gui/modules/popup.h>
 #include <gui/modules/dialog_ex.h>
 #include <gui/modules/submenu.h>
@@ -10,6 +9,7 @@
 #include <input/input.h>
 #include <storage/storage.h>
 #include <toolbox/stream/buffered_file_stream.h>
+#include <toolbox/stream/file_stream.h>
 #include <notification/notification.h>
 #include <notification/notification_messages.h>
 #include <dialogs/dialogs.h>
@@ -34,16 +34,14 @@ typedef enum {
     ViewIdMenu = 0,       // Submenu — main menu
     ViewIdFileBrowser,    // FileBrowser — file picker
     ViewIdSettings,       // VariableItemList — delay config
-    ViewIdConfirm,        // Widget — confirm writing
     ViewIdPolling,        // Popup — waiting for tag
     ViewIdResult,         // DialogEx — error or done screen
 } ViewId;
 
 typedef enum {
-    EvtCustomStart = 100,
-    EvtCustomSkip,
+    EvtCustomSkip = 100,
     EvtCustomRetry,
-    EvtCustomAbort,
+    EvtCustomAbort,        // quit the application
     EvtCustomTagOk,
     EvtCustomTagFail,
     EvtCustomMenuStart,    // "Start" selected in main menu
@@ -51,17 +49,17 @@ typedef enum {
     EvtCustomMenuSettings, // "Settings" selected in main menu
     EvtCustomFilePicked,   // file selected in file browser
     EvtCustomGoMenu,       // return to main menu (used after "All done" screen)
+    EvtCustomStoppedByUser, // worker was stopped by user (Back button) — go to menu, not quit
 } CustomEvent;
 
 typedef struct {
     Gui* gui;
     ViewDispatcher* view_dispatcher;
-    Widget* w_confirm;
     Popup* p_polling;
     DialogEx* d_result;
     NotificationApp* notifications;
 
-    // New GUI modules
+    // GUI modules
     Submenu* menu;
     FileBrowser* file_browser;
     FuriString* browser_result;   // output buffer for FileBrowser selected path
@@ -82,7 +80,7 @@ typedef struct {
     char popup_hdr[40];   // persistent storage for popup header string (popup holds pointer)
     char url_preview[64]; // persistent storage for URL preview on polling screen (popup holds pointer)
 
-    // New settings and state
+    // Settings and state
     uint32_t delay_ms;          // delay between tags in ms (default 1000)
     bool lock_after_write;      // if true, lock tag after writing NDEF (irreversible)
     char selected_path[256];    // currently selected urls.txt path
@@ -90,6 +88,58 @@ typedef struct {
     bool show_done;             // true when showing "All done" in result dialog
     bool browser_running;       // true while FileBrowser is active (guards file_browser_stop calls)
 } App;
+
+// --- Settings persistence ---
+
+// Save delay_ms, lock_after_write, and selected_path to APP_DATA_PATH("settings.cfg")
+static void save_settings(App* app) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    Stream* s = file_stream_alloc(storage);
+    if(file_stream_open(s, APP_DATA_PATH("settings.cfg"), FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+        FuriString* line = furi_string_alloc();
+
+        furi_string_printf(line, "delay_ms=%lu\n", (unsigned long)app->delay_ms);
+        stream_write_string(s, line);
+
+        furi_string_printf(line, "lock_after_write=%d\n", (int)app->lock_after_write);
+        stream_write_string(s, line);
+
+        furi_string_printf(line, "selected_path=%s\n", app->selected_path);
+        stream_write_string(s, line);
+
+        furi_string_free(line);
+        file_stream_close(s);
+    }
+    stream_free(s);
+    furi_record_close(RECORD_STORAGE);
+}
+
+// Load delay_ms, lock_after_write, and selected_path from APP_DATA_PATH("settings.cfg")
+// Missing or corrupt file is silently ignored — defaults remain in effect
+static void load_settings(App* app) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    Stream* s = file_stream_alloc(storage);
+    if(file_stream_open(s, APP_DATA_PATH("settings.cfg"), FSAM_READ, FSOM_OPEN_EXISTING)) {
+        FuriString* line = furi_string_alloc();
+        while(stream_read_line(s, line)) {
+            furi_string_trim(line);
+            const char* cstr = furi_string_get_cstr(line);
+            if(strncmp(cstr, "delay_ms=", 9) == 0) {
+                app->delay_ms = (uint32_t)atoi(cstr + 9);
+                if(app->delay_ms > 3000) app->delay_ms = 3000;
+            } else if(strncmp(cstr, "lock_after_write=", 17) == 0) {
+                app->lock_after_write = atoi(cstr + 17) != 0;
+            } else if(strncmp(cstr, "selected_path=", 14) == 0) {
+                strncpy(app->selected_path, cstr + 14, sizeof(app->selected_path) - 1);
+                app->selected_path[sizeof(app->selected_path) - 1] = '\0';
+            }
+        }
+        furi_string_free(line);
+        file_stream_close(s);
+    }
+    stream_free(s);
+    furi_record_close(RECORD_STORAGE);
+}
 
 static bool load_urls_from_path(App* app, const char* path) {
     Storage* storage = furi_record_open(RECORD_STORAGE);
@@ -194,26 +244,50 @@ static void scanner_cb(NfcScannerEvent event, void* ctx) {
 }
 
 // Permanently lock an NTAG21x tag — IRREVERSIBLE.
-// Applies static lock bytes (page 2, bytes 2-3) and dynamic lock bytes (page 40 for NTAG213).
+// Applies static lock bytes (page 2, bytes 2-3) and dynamic lock bytes on the
+// correct page for the detected tag variant (NTAG213/215/216).
 // Returns true if static locking succeeded (dynamic lock failure is non-fatal).
 static bool lock_tag(App* app) {
-    // Step 1: Read current page 2 (bytes 0-1 hold UID bytes 4-6; must be preserved)
-    MfUltralightPage page2;
-    MfUltralightError err = mf_ultralight_poller_sync_read_page(app->nfc, 2, &page2);
+    // Step 1: Read CC (Capability Container, page 3) to determine tag variant.
+    // CC byte 2 encodes total NDEF memory in units of 8 bytes:
+    //   NTAG213: 0x12 × 8 = 144 B → 45 pages  → dynamic lock page = 40
+    //   NTAG215: 0x3E × 8 = 496 B → 135 pages → dynamic lock page = 130
+    //   NTAG216: 0x6D × 8 = 888 B → 231 pages → dynamic lock page = 226
+    MfUltralightPage cc_page;
+    MfUltralightError err = mf_ultralight_poller_sync_read_page(app->nfc, 3, &cc_page);
     if(err != MfUltralightErrorNone) {
         return false;
     }
-    // Step 2: Set static lock bits (bytes 2-3 = 0xFF 0xFF) — permanently write-protects pages 3-15
+    uint8_t cc2 = cc_page.data[2];  // total NDEF size / 8
+    uint16_t dyn_lock_page;
+    uint8_t  dyn_lock_val;           // all bits to lock entire user memory
+    if(cc2 <= 0x12) {
+        dyn_lock_page = 40;
+        dyn_lock_val  = 0xFF;  // 8 lock bits → blocks pages 16-39 fully on NTAG213
+    } else if(cc2 <= 0x3E) {
+        dyn_lock_page = 130;
+        dyn_lock_val  = 0xFF;
+    } else {
+        dyn_lock_page = 226;
+        dyn_lock_val  = 0xFF;
+    }
+
+    // Step 2: Read current page 2 (bytes 0-1 hold UID bytes 4-5; must be preserved)
+    MfUltralightPage page2;
+    err = mf_ultralight_poller_sync_read_page(app->nfc, 2, &page2);
+    if(err != MfUltralightErrorNone) {
+        return false;
+    }
+    // Step 3: Set static lock bits (bytes 2-3 = 0xFF 0xFF) — permanently write-protects pages 3-15
     page2.data[2] = 0xFF;
     page2.data[3] = 0xFF;
     err = mf_ultralight_poller_sync_write_page(app->nfc, 2, &page2);
     if(err != MfUltralightErrorNone) {
         return false;
     }
-    // Step 3: Write dynamic lock bytes — page 40 for NTAG213 (byte 3 = RFUI, must be 0)
-    // For NTAG215/216 the dynamic lock page differs (130/226) but static lock already applied above.
-    MfUltralightPage lock_dyn = {{0x03, 0x00, 0x00, 0x00}};
-    err = mf_ultralight_poller_sync_write_page(app->nfc, 40, &lock_dyn);
+    // Step 4: Write dynamic lock bytes to the variant-correct page (byte 3 = RFUI, must be 0)
+    MfUltralightPage lock_dyn = {{dyn_lock_val, 0x00, 0x00, 0x00}};
+    err = mf_ultralight_poller_sync_write_page(app->nfc, dyn_lock_page, &lock_dyn);
     // Dynamic lock failure is non-fatal — static lock was already committed
     (void)err;
     return true;
@@ -221,7 +295,7 @@ static bool lock_tag(App* app) {
 
 static int32_t worker_thread(void* ctx) {
     App* app = ctx;
-    uint8_t buf[1 + 4 + 256] = {0};
+    uint8_t buf[270] = {0};  // fits max NDEF: TLV(4) + record header(4) + payload(255) + terminator(1) = 264
     size_t total = build_ndef(app->urls[app->url_index], buf, sizeof(buf));
     if(total == 0) {
         snprintf(app->last_msg, sizeof(app->last_msg), "URL too long");
@@ -239,7 +313,8 @@ static int32_t worker_thread(void* ctx) {
         furi_delay_ms(50);
     }
     if(app->stop_request) {
-        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomAbort);
+        // User pressed Back during delay — return to menu, not quit
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomStoppedByUser);
         return 0;
     }
 
@@ -257,7 +332,8 @@ static int32_t worker_thread(void* ctx) {
     app->scanner = NULL;
 
     if(app->stop_request) {
-        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomAbort);
+        // User pressed Back while waiting for tag — return to menu, not quit
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomStoppedByUser);
         return 0;
     }
     if(!app->tag_present) {
@@ -277,12 +353,17 @@ static int32_t worker_thread(void* ctx) {
         MfUltralightError err =
             mf_ultralight_poller_sync_write_page(app->nfc, NDEF_START_PAGE + p, &pg);
         if(err != MfUltralightErrorNone) {
+            // Provide human-readable error message based on error code
+            const char* err_str = "unknown";
+            if(err == MfUltralightErrorNotPresent) err_str = "tag removed";
+            else if(err == MfUltralightErrorProtocol) err_str = "tag locked/NAK";
+            else if(err == MfUltralightErrorAuth) err_str = "auth required";
+            else if(err == MfUltralightErrorTimeout) err_str = "timeout";
             snprintf(
                 app->last_msg,
                 sizeof(app->last_msg),
-                "Write failed @ pg %u (err %d)",
-                (unsigned)(NDEF_START_PAGE + p),
-                err);
+                "Write failed: %s",
+                err_str);
             view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomTagFail);
             return 0;
         }
@@ -312,7 +393,7 @@ static int32_t worker_thread(void* ctx) {
 
 static void start_worker(App* app) {
     app->stop_request = false;
-    app->worker = furi_thread_alloc_ex("ndef_worker", 2048, worker_thread, app);
+    app->worker = furi_thread_alloc_ex("ndef_worker", 4096, worker_thread, app);  // 4 KiB: sync NFC poller needs headroom
     furi_thread_start(app->worker);
 }
 
@@ -322,41 +403,6 @@ static void join_worker(App* app) {
     furi_thread_join(app->worker);
     furi_thread_free(app->worker);
     app->worker = NULL;
-}
-
-static void on_btn_write(GuiButtonType b, InputType t, void* c) {
-    (void)b;
-    if(t != InputTypeShort) return;  // filter out repeat and long-press events
-    App* a = c;
-    view_dispatcher_send_custom_event(a->view_dispatcher, EvtCustomStart);
-}
-
-static void on_btn_quit(GuiButtonType b, InputType t, void* c) {
-    (void)b;
-    if(t != InputTypeShort) return;  // filter out repeat and long-press events
-    App* a = c;
-    view_dispatcher_send_custom_event(a->view_dispatcher, EvtCustomAbort);
-}
-
-static void build_confirm(App* app) {
-    widget_reset(app->w_confirm);
-    char header[40];
-    snprintf(header, sizeof(header), "Tag %zu / %zu", app->url_index + 1, app->url_count);
-    widget_add_string_element(app->w_confirm, 64, 2, AlignCenter, AlignTop, FontPrimary, header);
-    char preview[36];
-    snprintf(
-        preview,
-        sizeof(preview),
-        "%.32s%s",
-        app->urls[app->url_index],
-        strlen(app->urls[app->url_index]) > 32 ? "..." : "");
-    widget_add_string_multiline_element(
-        app->w_confirm, 64, 30, AlignCenter, AlignCenter, FontSecondary, preview);
-    // Write on OK, Quit on Right — no Skip button
-    widget_add_button_element(
-        app->w_confirm, GuiButtonTypeCenter, "Write", on_btn_write, app);
-    widget_add_button_element(
-        app->w_confirm, GuiButtonTypeRight, "Quit", on_btn_quit, app);
 }
 
 static void on_result(DialogExResult r, void* c) {
@@ -372,7 +418,7 @@ static void on_result(DialogExResult r, void* c) {
         }
         break;
     case DialogExResultLeft:
-        // Left button: retry on failure screen
+        // Left button: retry on failure screen — go straight to polling
         view_dispatcher_send_custom_event(a->view_dispatcher, EvtCustomRetry);
         break;
     case DialogExResultRight:
@@ -390,7 +436,7 @@ static void show_result_fail(App* app) {
     dialog_ex_reset(app->d_result);
     dialog_ex_set_header(app->d_result, "Failed", 64, 4, AlignCenter, AlignTop);
     dialog_ex_set_text(app->d_result, app->last_msg, 64, 28, AlignCenter, AlignCenter);
-    // Left → EvtCustomRetry → retry this URL
+    // Left → EvtCustomRetry → retry this URL (goes straight to polling)
     dialog_ex_set_left_button_text(app->d_result, "Retry");
     // Right → EvtCustomAbort → exits the app
     dialog_ex_set_right_button_text(app->d_result, "Quit");
@@ -405,11 +451,24 @@ static void show_result_done(App* app) {
     dialog_ex_set_header(app->d_result, "All done!", 64, 4, AlignCenter, AlignTop);
     snprintf(app->last_msg, sizeof(app->last_msg), "Wrote %zu tags", app->url_count);
     dialog_ex_set_text(app->d_result, app->last_msg, 64, 28, AlignCenter, AlignCenter);
-    // Center button "OK" → EvtCustomAbort (handled via show_done flag in on_result)
+    // Center button "OK" → EvtCustomGoMenu (handled via show_done flag in on_result)
     dialog_ex_set_center_button_text(app->d_result, "OK");
     dialog_ex_set_result_callback(app->d_result, on_result);
     dialog_ex_set_context(app->d_result, app);
     view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdResult);
+}
+
+// Show the polling popup for the current URL index and start the worker
+static void show_polling_and_start(App* app) {
+    popup_reset(app->p_polling);
+    snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Tag %zu/%zu", app->url_index + 1, app->url_count);
+    popup_set_header(app->p_polling, app->popup_hdr, 64, 4, AlignCenter, AlignTop);
+    // Show truncated URL being written (stored persistently since popup holds the pointer)
+    snprintf(app->url_preview, sizeof(app->url_preview), "%.60s", app->urls[app->url_index]);
+    popup_set_text(app->p_polling, app->url_preview, 64, 28, AlignCenter, AlignCenter);
+    app->at_menu = false;
+    view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
+    start_worker(app);
 }
 
 // --- Main menu ---
@@ -530,7 +589,7 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
     App* app = ctx;
     switch(event) {
     case EvtCustomMenuStart: {
-        // If no URLs loaded, show an error popup and stay on menu
+        // If no URLs loaded, show an error popup and stay (back returns to menu via nav_cb)
         if(app->url_count == 0) {
             popup_reset(app->p_polling);
             popup_set_header(app->p_polling, "No URLs loaded", 64, 4, AlignCenter, AlignTop);
@@ -542,11 +601,9 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
             view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
             return true;
         }
-        // Reset index and show confirm screen for first tag
+        // Reset index and go straight to polling — no confirm screen
         app->url_index = 0;
-        app->at_menu = false;
-        build_confirm(app);
-        view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdConfirm);
+        show_polling_and_start(app);
         return true;
     }
     case EvtCustomMenuFile:
@@ -567,19 +624,6 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
         load_urls_from_path(app, app->selected_path);
         show_menu(app);
         return true;
-    case EvtCustomStart: {
-        if(app->worker) return true;  // prevent double-start
-        popup_reset(app->p_polling);
-        // Show "Tag N/M: URL" header
-        snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Tag %zu/%zu", app->url_index + 1, app->url_count);
-        popup_set_header(app->p_polling, app->popup_hdr, 64, 4, AlignCenter, AlignTop);
-        // Show truncated URL being written (stored persistently since popup holds the pointer)
-        snprintf(app->url_preview, sizeof(app->url_preview), "%.60s", app->urls[app->url_index]);
-        popup_set_text(app->p_polling, app->url_preview, 64, 28, AlignCenter, AlignCenter);
-        view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
-        start_worker(app);
-        return true;
-    }
     case EvtCustomTagOk:
         // Success: advance immediately and start writing next tag
         join_worker(app);
@@ -590,13 +634,7 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
             show_result_done(app);
         } else {
             // Auto-start writing next tag — show polling screen with next URL and launch worker
-            popup_reset(app->p_polling);
-            snprintf(app->popup_hdr, sizeof(app->popup_hdr), "Tag %zu/%zu", app->url_index + 1, app->url_count);
-            popup_set_header(app->p_polling, app->popup_hdr, 64, 4, AlignCenter, AlignTop);
-            snprintf(app->url_preview, sizeof(app->url_preview), "%.60s", app->urls[app->url_index]);
-            popup_set_text(app->p_polling, app->url_preview, 64, 28, AlignCenter, AlignCenter);
-            view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
-            start_worker(app);
+            show_polling_and_start(app);
         }
         return true;
     case EvtCustomTagFail:
@@ -610,13 +648,13 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
             // All done after skipping — show done screen
             show_result_done(app);
         } else {
-            build_confirm(app);
-            view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdConfirm);
+            // Go straight to polling for the next URL
+            show_polling_and_start(app);
         }
         return true;
     case EvtCustomRetry:
-        build_confirm(app);
-        view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdConfirm);
+        // Retry current URL — go straight to polling, no confirm screen
+        show_polling_and_start(app);
         return true;
     case EvtCustomGoMenu:
         // Return to main menu (e.g. after "All done" screen)
@@ -624,7 +662,13 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
         load_urls_from_path(app, app->selected_path);
         show_menu(app);
         return true;
+    case EvtCustomStoppedByUser:
+        // Worker was stopped by Back button press — return to menu, do NOT quit app
+        join_worker(app);
+        show_menu(app);
+        return true;
     case EvtCustomAbort:
+        // Quit the entire application
         join_worker(app);
         view_dispatcher_stop(app->view_dispatcher);
         return true;
@@ -636,12 +680,26 @@ static bool nav_cb(void* ctx) {
     App* app = ctx;
     if(app->at_menu) {
         // Back from main menu → quit the application
-        join_worker(app);
+        // If worker is somehow running, stop it first
+        if(app->worker) {
+            app->stop_request = true;
+            // Don't join here — worker will send EvtCustomStoppedByUser which we won't handle
+            // since view_dispatcher_stop is called; just force-stop for cleanup
+            furi_thread_join(app->worker);
+            furi_thread_free(app->worker);
+            app->worker = NULL;
+        }
         view_dispatcher_stop(app->view_dispatcher);
         return true;
     }
-    // Back from any other screen → stop worker, stop browser (only if running), return to menu
-    join_worker(app);
+    if(app->worker) {
+        // Worker is running (scanning or writing) — signal stop and let worker
+        // send EvtCustomStoppedByUser which will call show_menu().
+        // Do NOT call join_worker here (it blocks) or show_menu (worker will do it).
+        app->stop_request = true;
+        return true;
+    }
+    // No worker running — stop browser if active, return to menu directly
     if(app->browser_running) {
         file_browser_stop(app->file_browser);
         app->browser_running = false;
@@ -661,7 +719,10 @@ int32_t batch_ndef_writer_app(void* p) {
     strncpy(app->selected_path, URLS_PATH, sizeof(app->selected_path) - 1);
     app->selected_path[sizeof(app->selected_path) - 1] = '\0';
 
-    // Try to load URLs from default path — may fail, user can select file from menu
+    // Override defaults with persisted settings (missing file is silently ignored)
+    load_settings(app);
+
+    // Try to load URLs from selected path — may fail, user can select file from menu
     load_urls_from_path(app, app->selected_path);
 
     app->gui = furi_record_open(RECORD_GUI);
@@ -675,7 +736,6 @@ int32_t batch_ndef_writer_app(void* p) {
     view_dispatcher_set_navigation_event_callback(app->view_dispatcher, nav_cb);
 
     // Allocate GUI modules
-    app->w_confirm = widget_alloc();
     app->p_polling = popup_alloc();
     app->d_result = dialog_ex_alloc();
     app->menu = submenu_alloc();
@@ -691,8 +751,6 @@ int32_t batch_ndef_writer_app(void* p) {
     view_dispatcher_add_view(
         app->view_dispatcher, ViewIdSettings, variable_item_list_get_view(app->settings_list));
     view_dispatcher_add_view(
-        app->view_dispatcher, ViewIdConfirm, widget_get_view(app->w_confirm));
-    view_dispatcher_add_view(
         app->view_dispatcher, ViewIdPolling, popup_get_view(app->p_polling));
     view_dispatcher_add_view(
         app->view_dispatcher, ViewIdResult, dialog_ex_get_view(app->d_result));
@@ -702,7 +760,9 @@ int32_t batch_ndef_writer_app(void* p) {
 
     view_dispatcher_run(app->view_dispatcher);
 
-    // Teardown
+    // Teardown: save settings before freeing resources
+    save_settings(app);
+
     join_worker(app);
     if(app->browser_running) {
         file_browser_stop(app->file_browser);
@@ -712,7 +772,6 @@ int32_t batch_ndef_writer_app(void* p) {
     view_dispatcher_remove_view(app->view_dispatcher, ViewIdMenu);
     view_dispatcher_remove_view(app->view_dispatcher, ViewIdFileBrowser);
     view_dispatcher_remove_view(app->view_dispatcher, ViewIdSettings);
-    view_dispatcher_remove_view(app->view_dispatcher, ViewIdConfirm);
     view_dispatcher_remove_view(app->view_dispatcher, ViewIdPolling);
     view_dispatcher_remove_view(app->view_dispatcher, ViewIdResult);
 
@@ -720,7 +779,6 @@ int32_t batch_ndef_writer_app(void* p) {
     file_browser_free(app->file_browser);
     furi_string_free(app->browser_result);
     variable_item_list_free(app->settings_list);
-    widget_free(app->w_confirm);
     popup_free(app->p_polling);
     dialog_ex_free(app->d_result);
     view_dispatcher_free(app->view_dispatcher);
