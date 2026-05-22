@@ -116,6 +116,7 @@ def _build_scoreboard_data() -> dict:
         {
             "nick": ev.player.nick if ev.player else (ev.player_id or "<deleted>"),
             "delta": ev.delta_points,
+            "scanned_at": ev.scanned_at.strftime("%Y-%m-%dT%H:%M:%SZ") if ev.scanned_at else None,
         }
         for ev in recent_events
     ]

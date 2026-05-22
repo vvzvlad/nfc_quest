@@ -219,18 +219,29 @@ function ScreenHallScoreboard() {
         <span style={{ color: 'var(--accent)', fontWeight: 600, letterSpacing: '0.1em' }}>· LOG ·</span>
         {recentScans.length === 0
           ? <span style={{ color: 'var(--muted)' }}>ожидание событий…</span>
-          : recentScans.map((scan, i) => (
-              <React.Fragment key={i}>
-                {i > 0 && <span style={{ color: 'var(--muted-2)' }}>·</span>}
-                <span>
-                  <b style={{ color: 'var(--fg)' }}>{scan.nick}</b>
-                  {' '}
-                  <span style={{ color: scan.delta >= 0 ? 'var(--success)' : 'var(--accent)' }}>
-                    {scan.delta >= 0 ? '+' : ''}{scan.delta}
+          : recentScans.map((scan, i) => {
+              // Compute seconds elapsed since this scan occurred
+              const secsAgo = scan.scanned_at
+                ? Math.max(0, Math.round((Date.now() - new Date(scan.scanned_at).getTime()) / 1000))
+                : null;
+              return (
+                <React.Fragment key={scan.nick + (scan.scanned_at || String(i))}>
+                  {i > 0 && <span style={{ color: 'var(--muted-2)' }}>·</span>}
+                  <span>
+                    <b style={{ color: 'var(--fg)' }}>{scan.nick}</b>
+                    {' '}
+                    <span style={{ color: scan.delta >= 0 ? 'var(--success)' : 'var(--accent)' }}>
+                      {scan.delta >= 0 ? '+' : ''}{scan.delta}
+                    </span>
+                    {secsAgo !== null && (
+                      <span style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 4 }}>
+                        {secsAgo}с
+                      </span>
+                    )}
                   </span>
-                </span>
-              </React.Fragment>
-            ))
+                </React.Fragment>
+              );
+            })
         }
         <span style={{ color: 'var(--muted)' }}>{window.location.host}</span>
       </div>
