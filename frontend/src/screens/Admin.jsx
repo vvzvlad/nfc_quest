@@ -576,6 +576,7 @@ function ScreenAdminTags() {
   const [bulkEditOpen, setBulkEditOpen] = React.useState(false);   // whether bulk edit panel is shown
   const perPage = 50;
   const requestIdRef = React.useRef(0);
+  const lastCheckedIndexRef = React.useRef(null); // index of last clicked checkbox for Shift+click range selection
 
   React.useEffect(() => {
     const id = setTimeout(() => setDebouncedSearch(search), 300);
@@ -598,6 +599,9 @@ function ScreenAdminTags() {
   }, [page, debouncedSearch]);
 
   React.useEffect(() => { loadTags(); }, [loadTags]);
+
+  // Reset Shift+click anchor when page or search changes — old index is invalid after tag list reload
+  React.useEffect(() => { lastCheckedIndexRef.current = null; }, [page, debouncedSearch]);
 
   // Dismiss tag detail panel on Escape
   React.useEffect(() => {
@@ -645,55 +649,42 @@ function ScreenAdminTags() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', height: '100%' }}>
         {/* main */}
         <div style={{ overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
-          {/* filter bar */}
+          {/* filter bar — fixed height, bulk controls appear inline when tags are selected */}
           <div style={{ padding: '10px 24px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <div className="brak" style={{ fontSize: 11 }}>все метки · {total}</div>
               <input className="input sm" placeholder="tag_id или label" style={{ width: 220 }}
                 value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
             </div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-              {loading ? 'загрузка…' : `${tags.length} из ${total}`}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {selectedIds.size > 0 ? (
+                <>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--fg)', whiteSpace: 'nowrap' }}>выбрано · {selectedIds.size}</span>
+                  <button className="btn ghost sm" onClick={() => { setSelectedIds(new Set()); setBulkEditOpen(false); lastCheckedIndexRef.current = null; }}>снять</button>
+                  <button className="btn ghost sm" onClick={() => setBulkEditOpen(true)}>изменить стратегию</button>
+                  <button
+                    className="btn sm"
+                    style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'transparent' }}
+                    onClick={async () => {
+                      if (!window.confirm(`Удалить ${selectedIds.size} меток? Это действие необратимо.`)) return;
+                      const res = await adminApi.bulkDeleteTags({ ids: [...selectedIds] });
+                      if (!res.ok) {
+                        window.alert(res.data?.error || 'Ошибка удаления');
+                        return;
+                      }
+                      setSelectedIds(new Set());
+                      setBulkEditOpen(false);
+                      loadTags();
+                    }}
+                  >удалить</button>
+                </>
+              ) : (
+                <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                  {loading ? 'загрузка…' : `${tags.length} из ${total}`}
+                </div>
+              )}
             </div>
           </div>
-
-          {/* bulk action bar — visible only when at least one tag is selected */}
-          {selectedIds.size > 0 && (
-            <div style={{
-              padding: '8px 24px',
-              borderBottom: '1px solid var(--line)',
-              background: 'rgba(240,180,41,0.06)',
-              display: 'flex', alignItems: 'center', gap: 12,
-            }}>
-              <span className="mono" style={{ fontSize: 11, color: 'var(--fg)' }}>
-                выбрано · {selectedIds.size}
-              </span>
-              <span style={{ flex: 1 }} />
-              <button className="btn ghost sm" onClick={() => { setSelectedIds(new Set()); setBulkEditOpen(false); }}>
-                снять выделение
-              </button>
-              <button className="btn ghost sm" onClick={() => setBulkEditOpen(true)}>
-                изменить стратегию / параметры
-              </button>
-              <button
-                className="btn sm"
-                style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'transparent' }}
-                onClick={async () => {
-                  if (!window.confirm(`Удалить ${selectedIds.size} меток? Это действие необратимо.`)) return;
-                  const res = await adminApi.bulkDeleteTags({ ids: [...selectedIds] });
-                  if (!res.ok) {
-                    window.alert(res.data?.error || 'Ошибка удаления');
-                    return;
-                  }
-                  setSelectedIds(new Set());
-                  setBulkEditOpen(false);
-                  loadTags();
-                }}
-              >
-                удалить выбранные
-              </button>
-            </div>
-          )}
 
           {/* dense table */}
           <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 12, fontFamily: 'var(--font-sans)' }}>
@@ -750,19 +741,39 @@ function ScreenAdminTags() {
                     background: selectedTag && selectedTag.id === t.id ? 'var(--bg-2)' : i === 0 && !selectedTag ? 'var(--bg-2)' : 'transparent',
                     cursor: 'pointer',
                   }}>
-                    {/* per-row checkbox — stopPropagation prevents opening TagDetailPanel */}
+                    {/* per-row checkbox — stopPropagation prevents opening TagDetailPanel; supports Shift+click range selection */}
                     <td style={{ padding: '5px 12px' }} onClick={e => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
                         checked={selectedIds.has(t.id)}
-                        onChange={() => {
-                          setSelectedIds(prev => {
-                            const next = new Set(prev);
-                            if (next.has(t.id)) next.delete(t.id);
-                            else next.add(t.id);
-                            return next;
-                          });
+                        onChange={e => {
+                          e.stopPropagation();
+                          if (e.nativeEvent.shiftKey && lastCheckedIndexRef.current !== null) {
+                            // Shift+click: select range from anchor to current index (anchor unchanged)
+                            const from = Math.min(lastCheckedIndexRef.current, i);
+                            const to = Math.max(lastCheckedIndexRef.current, i);
+                            const anchorChecked = selectedIds.has(tags[lastCheckedIndexRef.current].id);
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              // Inherit anchor action: add if anchor was unchecked, remove if checked
+                              tags.slice(from, to + 1).forEach(tag => {
+                                if (anchorChecked) next.delete(tag.id);
+                                else next.add(tag.id);
+                              });
+                              return next;
+                            });
+                            // Do NOT update anchor on Shift+click — allows extending the range
+                          } else {
+                            // Regular click: toggle single tag and set new anchor
+                            setSelectedIds(prev => {
+                              const next = new Set(prev);
+                              if (next.has(t.id)) next.delete(t.id);
+                              else next.add(t.id);
+                              return next;
+                            });
+                            lastCheckedIndexRef.current = i;
+                          }
                         }}
                       />
                     </td>
