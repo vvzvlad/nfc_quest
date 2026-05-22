@@ -2,7 +2,7 @@
 Block E: Scoreboard endpoint tests.
 """
 from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
-from blueprints.game_api import rate_limiter
+from blueprints.game_api import rate_limiter, tag_scan_limiter
 
 
 class TestScoreboard:
@@ -359,3 +359,169 @@ class TestScoreboardRecentScans:
 
         assert "recent_scans" in body
         assert body["recent_scans"] == []
+    
+    
+class TestScoreboardLastScanAt:
+    # LSA-1: last_scan_at key is always present in every player entry (even without a scan)
+    def test_last_scan_at_key_always_present(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, make_player_id("lsa1-player"), "NickLSA1")
+        # No scan performed — key must still be present
+
+        r = client.get("/api/scoreboard")
+        assert r.status_code == 200
+        players = r.get_json()["players"]
+
+        player = next(p for p in players if p["nick"] == "NickLSA1")
+        assert "last_scan_at" in player, f"'last_scan_at' key missing from player dict: {player}"
+
+    # LSA-2: last_scan_at is null for a player who has never scanned
+    def test_last_scan_at_null_before_any_scan(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, make_player_id("lsa2-player"), "NickLSA2")
+        # No scan performed
+
+        r = client.get("/api/scoreboard")
+        assert r.status_code == 200
+        players = r.get_json()["players"]
+
+        player = next(p for p in players if p["nick"] == "NickLSA2")
+        assert player["last_scan_at"] is None, (
+            f"Expected last_scan_at to be None for player with no scans, got {player['last_scan_at']!r}"
+        )
+
+    # LSA-3: last_scan_at is a valid ISO 8601 UTC string after a successful scan
+    def test_last_scan_at_iso8601_after_successful_scan(self, client, admin_client):
+        from datetime import datetime, timezone, timedelta
+
+        start_game(admin_client)
+        register_player(client, make_player_id("lsa3-player"), "NickLSA3")
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
+
+        rate_limiter.clear()
+        r_scan = scan_tag(client, make_player_id("lsa3-player"), tags[0]["id"])
+        assert r_scan.get_json()["status"] == "ok"
+
+        r = client.get("/api/scoreboard")
+        assert r.status_code == 200
+        players = r.get_json()["players"]
+
+        player = next(p for p in players if p["nick"] == "NickLSA3")
+        last_scan_at = player["last_scan_at"]
+
+        # Must be a non-null string
+        assert last_scan_at is not None, "Expected last_scan_at to be non-null after a successful scan"
+        assert isinstance(last_scan_at, str), f"last_scan_at must be a string, got {type(last_scan_at)}"
+
+        # Must end with 'Z' and contain 'T' separator
+        assert last_scan_at.endswith("Z"), f"last_scan_at must end with 'Z', got {last_scan_at!r}"
+        assert "T" in last_scan_at, f"last_scan_at must contain 'T' separator, got {last_scan_at!r}"
+
+        # Must be parseable as YYYY-MM-DDTHH:MM:SSZ
+        parsed = datetime.strptime(last_scan_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        assert now - timedelta(seconds=30) < parsed <= now, (
+            f"last_scan_at {last_scan_at!r} is not within the last 30 seconds"
+        )
+
+    # LSA-4: last_scan_at advances to the second scan's timestamp after multiple scans
+    def test_last_scan_at_updated_after_multiple_scans(self, client, admin_client):
+        import time
+        start_game(admin_client)
+        register_player(client, make_player_id("lsa4-player"), "NickLSA4")
+        tags = create_tag(admin_client, "random", {"min": 5, "max": 5})
+        tag_id = tags[0]["id"]
+
+        # First scan — record its timestamp
+        rate_limiter.clear()
+        r1 = scan_tag(client, make_player_id("lsa4-player"), tag_id)
+        assert r1.get_json()["status"] == "ok"
+
+        r_mid = client.get("/api/scoreboard")
+        player_mid = next(p for p in r_mid.get_json()["players"] if p["nick"] == "NickLSA4")
+        first_scan_at = player_mid["last_scan_at"]
+        assert first_scan_at is not None, "last_scan_at must be set after the first scan"
+
+        # Wait 1 second so the second scan gets a strictly later timestamp
+        time.sleep(1)
+
+        # Second scan on the same tag
+        rate_limiter.clear()
+        r2 = scan_tag(client, make_player_id("lsa4-player"), tag_id)
+        assert r2.get_json()["status"] == "ok"
+
+        r_final = client.get("/api/scoreboard")
+        player_final = next(p for p in r_final.get_json()["players"] if p["nick"] == "NickLSA4")
+        last_scan_at = player_final["last_scan_at"]
+
+        # last_scan_at must have advanced to the second scan's timestamp
+        assert last_scan_at is not None, "last_scan_at must be non-null after multiple scans"
+        assert last_scan_at > first_scan_at, (
+            f"last_scan_at must advance after second scan; "
+            f"first={first_scan_at!r}, second={last_scan_at!r}"
+        )
+
+    # LSA-6: last_scan_at is unchanged (reflects the first successful scan) after a cooldown rejection
+    def test_last_scan_at_unchanged_after_cooldown_scan(self, client, admin_client):
+        from datetime import datetime, timezone, timedelta
+
+        start_game(admin_client)
+        player_id = make_player_id("lsa6-player")
+        register_player(client, player_id, "NickLSA6")
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        tag_id = tags[0]["id"]
+
+        # First scan succeeds and sets the per-tag cooldown
+        rate_limiter.clear()
+        r1 = scan_tag(client, player_id, tag_id)
+        assert r1.get_json()["status"] == "ok", "First scan should succeed"
+
+        # Bypass the 1-second global rate limit WITHOUT clearing tag_scan_limiter:
+        # backdate rate_limiter entry so the rate limit check passes, then restore
+        # tag_scan_limiter[scan_key] with a fresh timestamp so the 60s per-tag
+        # cooldown is still active for the second scan.
+        scan_key = (player_id, tag_id)
+        rate_limiter[player_id] = datetime.now(timezone.utc) - timedelta(seconds=2)
+        tag_scan_limiter[scan_key] = datetime.now(timezone.utc)  # restore fresh cooldown
+
+        # Second scan must be blocked by the 60s per-tag cooldown
+        r2 = scan_tag(client, player_id, tag_id)
+        assert r2.get_json()["status"] == "cooldown", "Second scan should be blocked by per-tag cooldown"
+
+        # last_scan_at must still reflect only the first (successful) scan — NOT be null
+        # (the cooldown scan does not create a ScanEvent with result="ok")
+        r = client.get("/api/scoreboard")
+        players = r.get_json()["players"]
+        player = next(p for p in players if p["nick"] == "NickLSA6")
+        assert player["last_scan_at"] is not None, (
+            "last_scan_at should reflect the first successful scan even after a cooldown rejection"
+        )
+
+    # LSA-5: last_scan_at is null for a player whose only scan result was "locked"
+    def test_last_scan_at_null_for_locked_scan_only(self, client, admin_client):
+        start_game(admin_client)
+
+        # First player scans and locks the one_time_global tag
+        register_player(client, make_player_id("lsa5-player-first"), "NickLSA5First")
+        tags = create_tag(admin_client, "one_time_global", {"points": 20})
+        tag_id = tags[0]["id"]
+
+        rate_limiter.clear()
+        r_first = scan_tag(client, make_player_id("lsa5-player-first"), tag_id)
+        assert r_first.get_json()["status"] == "ok", "First player's scan should succeed"
+
+        # Second player attempts to scan the same locked tag
+        register_player(client, make_player_id("lsa5-player-second"), "NickLSA5Second")
+        rate_limiter.clear()
+        r_second = scan_tag(client, make_player_id("lsa5-player-second"), tag_id)
+        assert r_second.get_json()["status"] == "locked", "Second player's scan should be locked"
+
+        r = client.get("/api/scoreboard")
+        assert r.status_code == 200
+        players = r.get_json()["players"]
+
+        second_player = next(p for p in players if p["nick"] == "NickLSA5Second")
+        assert second_player["last_scan_at"] is None, (
+            f"Expected last_scan_at to be None for player with only a locked scan, "
+            f"got {second_player['last_scan_at']!r}"
+        )

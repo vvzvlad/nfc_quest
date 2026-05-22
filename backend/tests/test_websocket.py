@@ -219,3 +219,52 @@ def test_ws_broadcast_after_admin_adjust(app, client, admin_client, ws_client):
     assert event is not None, (
         "Expected scoreboard_update broadcast after admin point adjustment, but none received"
     )
+
+
+def test_ws_scoreboard_update_includes_last_scan_at(app, client, admin_client, ws_client):
+    """WS-LSA: scoreboard_update payload must include last_scan_at for every player entry;
+    after a successful scan the scanning player's last_scan_at must be non-null."""
+    from helpers import start_game, create_tag, register_player, scan_tag, make_player_id
+    from blueprints.game_api import rate_limiter
+
+    # Setup: start game, register player, create tag
+    start_game(admin_client)
+    register_player(client, make_player_id("player-wlsa"), "PlayerWLSA")
+    tags = create_tag(admin_client, "random", {"min": 15, "max": 15})
+    tag_id = tags[0]["id"]
+
+    # Drain initial connect events so only the post-scan broadcast remains
+    ws_client.get_received()
+
+    # Perform a successful scan — this triggers a scoreboard_update broadcast
+    rate_limiter.clear()
+    r = scan_tag(client, make_player_id("player-wlsa"), tag_id)
+    assert r.get_json()["status"] == "ok"
+
+    # Collect the post-scan scoreboard_update event
+    received = ws_client.get_received()
+    event = next((e for e in received if e["name"] == "scoreboard_update"), None)
+    assert event is not None, "Expected scoreboard_update broadcast after a successful scan"
+
+    data = event["args"][0]
+    players = data["players"]
+    assert len(players) >= 1, "scoreboard_update payload must contain at least one player"
+
+    # Every player entry in the payload must have a last_scan_at key
+    for player in players:
+        assert "last_scan_at" in player, (
+            f"'last_scan_at' key missing from WS scoreboard_update player entry: {player}"
+        )
+
+    # The scanning player's last_scan_at must be non-null after a successful scan
+    scanning_player = next((p for p in players if p["nick"] == "PlayerWLSA"), None)
+    assert scanning_player is not None, "Scanning player 'PlayerWLSA' not found in WS payload"
+    assert scanning_player["last_scan_at"] is not None, (
+        "Expected last_scan_at to be non-null for the scanning player in WS scoreboard_update payload"
+    )
+    from datetime import datetime
+    lsa = scanning_player["last_scan_at"]
+    assert isinstance(lsa, str), f"last_scan_at must be a string in WS payload, got {type(lsa)}"
+    assert lsa.endswith("Z"), f"last_scan_at must end with 'Z', got {lsa!r}"
+    assert "T" in lsa, f"last_scan_at must contain 'T' separator, got {lsa!r}"
+    datetime.strptime(lsa, "%Y-%m-%dT%H:%M:%SZ")  # must be parseable as ISO 8601 UTC
