@@ -24,6 +24,8 @@ class TestAdminAuth:
         ("DELETE", "/admin/api/tags"),
         ("PUT",    "/admin/api/game"),
         ("POST",   "/admin/api/tags/batch"),
+        ("POST",   "/admin/api/tags/bulk_update"),
+        ("POST",   "/admin/api/tags/bulk_delete"),
         ("DELETE", "/admin/api/players/nonexistent"),
         ("DELETE", "/admin/api/tags/nonexistent"),
         ("POST",   "/admin/api/tags/nonexistent/reset"),
@@ -992,7 +994,8 @@ class TestAdminBulkTagOps:
         assert r.get_json()["updated"] == 3
 
         # Verify all three tags now have the updated strategy and params
-        r_list = admin_client.get("/admin/api/tags")
+        # Use per_page=500 to ensure all tags fit on one page regardless of other test data
+        r_list = admin_client.get("/admin/api/tags?per_page=500")
         items = r_list.get_json()["items"]
         updated_tags = [t for t in items if t["id"] in ids]
         assert len(updated_tags) == 3

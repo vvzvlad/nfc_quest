@@ -674,6 +674,7 @@ function ScreenAdminTags() {
                       }
                       setSelectedIds(new Set());
                       setBulkEditOpen(false);
+                      lastCheckedIndexRef.current = null; // reset anchor — deleted tags are gone
                       loadTags();
                     }}
                   >удалить</button>
@@ -1068,17 +1069,23 @@ function BulkEditPanel({ selectedCount, selectedIds, onClose, onSaved }) {
     } else {
       strategy_params = { points: parseInt(editParams) || 0 };
     }
-    const res = await adminApi.bulkUpdateTags({
-      ids: selectedIds,
-      strategy: editStrategy,
-      strategy_params,
-    });
-    setSaving(false);
-    if (res.ok) {
-      setSaveError(null);
-      onSaved();
-    } else {
-      setSaveError(res.data?.error || 'Ошибка сохранения');
+    try {
+      const res = await adminApi.bulkUpdateTags({
+        ids: selectedIds,
+        strategy: editStrategy,
+        strategy_params,
+      });
+      if (res.ok) {
+        setSaveError(null);
+        onSaved();
+      } else {
+        setSaveError(res.data?.error || 'Ошибка сохранения');
+      }
+    } catch {
+      // Network error or request timeout — show message and unblock the button
+      setSaveError('Сетевая ошибка');
+    } finally {
+      setSaving(false);
     }
   };
 

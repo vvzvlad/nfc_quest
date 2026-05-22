@@ -432,9 +432,11 @@ def bulk_update_tags():
     if "strategy_params" in data and not isinstance(data.get("strategy_params"), dict):
         return jsonify({"error": "INVALID_STRATEGY_PARAMS"}), 400
 
+    # Batch-load all existing tags in one query instead of N separate SELECTs
+    tags_map = {t.id: t for t in db.session.query(Tag).filter(Tag.id.in_(ids)).all()}
     updated = 0
     for tag_id in ids:
-        tag = db.session.get(Tag, tag_id)
+        tag = tags_map.get(tag_id)
         if tag is None:
             continue
         if "strategy" in data:
@@ -457,15 +459,15 @@ def bulk_delete_tags():
         return jsonify({"error": "INVALID_IDS"}), 400
     ids = [str(i) for i in ids[:500]]
 
-    deleted = 0
-    for tag_id in ids:
-        tag = db.session.get(Tag, tag_id)
-        if tag is None:
-            continue
-        db.session.query(TagPlayerScan).filter_by(tag_id=tag_id).delete()
-        db.session.query(ScanEvent).filter_by(tag_id=tag_id).update({"tag_id": None})
-        db.session.delete(tag)
-        deleted += 1
+    # Find which of the requested IDs actually exist, to compute accurate deleted count
+    existing_ids = [t.id for t in db.session.query(Tag.id).filter(Tag.id.in_(ids)).all()]
+    deleted = len(existing_ids)
+
+    if existing_ids:
+        # Batch FK cleanup: remove per-player scan records and nullify scan event references
+        db.session.query(TagPlayerScan).filter(TagPlayerScan.tag_id.in_(existing_ids)).delete(synchronize_session=False)
+        db.session.query(ScanEvent).filter(ScanEvent.tag_id.in_(existing_ids)).update({"tag_id": None}, synchronize_session=False)
+        db.session.query(Tag).filter(Tag.id.in_(existing_ids)).delete(synchronize_session=False)
 
     db.session.commit()
     return jsonify({"deleted": deleted}), 200
