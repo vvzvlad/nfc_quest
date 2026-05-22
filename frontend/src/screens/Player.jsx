@@ -330,7 +330,7 @@ function ScanResultLayout({
 
 
 function BoardSliceRow({ place, name, score, mine, delta, prevPlace, dim }) {
-  const medal = place === 1 ? 'var(--gold)' : place === 2 ? 'var(--silver)' : place === 3 ? 'var(--bronze)' : null;
+  const medal = place === 1 ? 'var(--gold)' : place <= 4 ? 'var(--silver)' : place <= 15 ? 'var(--bronze)' : null;
   // place arrow: prevPlace > place = went up (green), prevPlace < place = went down (red)
   let arrow = null;
   if (typeof prevPlace === 'number' && prevPlace !== place) {
@@ -563,11 +563,11 @@ function ScanFinished({ user, score, tagId, boardSlice, boardTimer, boardTimerLa
   );
 }
 
-// State: quest finished — winner screen for top-10 players
+// State: quest finished — winner screen for top-15 players
 // Displays a bright fullscreen congratulation with the player's place number
 function ScanFinishedWinner({ user, score, rank }) {
-  // Gold background for top 3, warm amber for places 4-10
-  const bgColor = rank <= 3 ? '#f6cd5b' : '#f0b429';
+  // Gold for 1st, silver-grey for 2-4, bronze-amber for 5-15
+  const bgColor = rank === 1 ? '#f6cd5b' : rank <= 4 ? '#c8cdd4' : '#c98452';
   const placeStr = String(rank).padStart(2, '0');
 
   return (
@@ -780,7 +780,7 @@ function ScreenScoreboardMobile({ initialData }) {
 }
 
 function BoardRow({ place, name, score, mine }) {
-  const medal = place === 1 ? 'var(--gold)' : place === 2 ? 'var(--silver)' : place === 3 ? 'var(--bronze)' : null;
+  const medal = place === 1 ? 'var(--gold)' : place <= 4 ? 'var(--silver)' : place <= 15 ? 'var(--bronze)' : null;
   return (
     <div style={{
       display: 'grid',

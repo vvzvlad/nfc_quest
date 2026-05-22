@@ -290,7 +290,7 @@ function Stat({ label, value }) {
 }
 
 function HallRow({ place, name, score }) {
-  const medal = place === 1 ? 'var(--gold)' : place === 2 ? 'var(--silver)' : place === 3 ? 'var(--bronze)' : null;
+  const medal = place === 1 ? 'var(--gold)' : place <= 4 ? 'var(--silver)' : place <= 15 ? 'var(--bronze)' : null;
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '48px 1fr auto',
