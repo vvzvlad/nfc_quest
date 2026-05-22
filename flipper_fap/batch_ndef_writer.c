@@ -502,17 +502,21 @@ static int32_t scan_worker_thread(void* ctx) {
         if(app->last_err != MfUltralightErrorNone) {
             snprintf(app->scan_result, sizeof(app->scan_result), "Not an NTAG/MFUL tag");
         } else {
-            // Read the user memory holding the NDEF message, page by page from page 4
+            // Read the whole tag in a single activation cycle (much faster than
+            // reading page-by-page, which re-activates the card for every page)
+            MfUltralightData* mfu = mf_ultralight_alloc();
+            mf_ultralight_poller_sync_read_card(app->nfc, mfu, NULL);
+
             uint8_t buf[160];
             size_t got = 0;
-            for(size_t p = 0; p < sizeof(buf) / 4; p++) {
-                MfUltralightPage pg;
-                MfUltralightError err =
-                    mf_ultralight_poller_sync_read_page(app->nfc, NDEF_START_PAGE + p, &pg);
-                if(err != MfUltralightErrorNone) break;
-                memcpy(&buf[got], pg.data, 4);
+            for(uint16_t p = NDEF_START_PAGE;
+                p < mfu->pages_read && got + 4 <= sizeof(buf);
+                p++) {
+                memcpy(&buf[got], mfu->page[p].data, 4);
                 got += 4;
             }
+            mf_ultralight_free(mfu);
+
             if(got == 0) {
                 snprintf(app->scan_result, sizeof(app->scan_result), "Read failed");
             } else if(parse_ndef_url(buf, got, app->scan_result, sizeof(app->scan_result))) {
