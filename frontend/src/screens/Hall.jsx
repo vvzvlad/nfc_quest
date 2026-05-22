@@ -129,7 +129,7 @@ function ScreenHallScoreboard() {
 
     // Cancel in-progress animations — elements snap to their final DOM positions
     elements.forEach(el => {
-      el.getAnimations().forEach(anim => anim.cancel());
+      el.getAnimations({ subtree: true }).forEach(anim => anim.cancel());
     });
 
     // Read final (post-cancel) positions and scores from the DOM
@@ -190,7 +190,7 @@ function ScreenHallScoreboard() {
         const startValue    = animatedScoresRef.current[nick] ?? prevNum;
         const startDelta    = curNum - startValue;
         const absStartDelta = Math.abs(startDelta);
-        const startTicks    = absStartDelta > 0 ? Math.min(Math.ceil(absStartDelta / 5), 20) : 0;
+        const startTicks    = absStartDelta > 0 ? Math.min(Math.ceil(absStartDelta / 50), 7) : 0;
         const startStepSize = startDelta > 0
           ? Math.ceil(absStartDelta / Math.max(startTicks, 1))
           : -Math.ceil(absStartDelta / Math.max(startTicks, 1));
@@ -203,7 +203,7 @@ function ScreenHallScoreboard() {
           // Seed display at the current animated value (smooth continuation if interrupted)
           setAnimated(nick, startValue);
 
-          // Tick every 100 ms toward curNum; also trigger per-tick pop animation in HallRow
+          // Tick every 300 ms toward curNum; also trigger per-tick pop animation in HallRow
           let ticksDone = 0;
           const intervalId = setInterval(() => {
             ticksDone++;
@@ -238,8 +238,32 @@ function ScreenHallScoreboard() {
                 }
               }
             }
-          }, 100);
+          }, 300);
           animatingRef.current[nick] = intervalId;
+        }
+
+        // No counting needed (startValue already equals curNum): fire FLIP with one-frame delay
+        // (same pattern as deferred FLIP in startTicks > 0 branch; ensures React state flushes first)
+        if (startTicks === 0 && capturedPrevRect && capturedNewRect) {
+          setAnimated(nick, curNum); // ensure animatedScores state is in sync even if ref was ahead
+          const dx = capturedPrevRect.left - capturedNewRect.left;
+          const dy = capturedPrevRect.top  - capturedNewRect.top;
+          if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+            const tid = setTimeout(() => {
+              delete flipTimeoutsRef.current[nick];
+              const domEl = document.querySelector(`[data-nick="${CSS.escape(nick)}"]`);
+              if (domEl) {
+                domEl.animate(
+                  [
+                    { transform: `translate(${dx}px, ${dy}px)` },
+                    { transform: 'translate(0, 0)' },
+                  ],
+                  { duration: 600, easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)' }
+                );
+              }
+            }, 16);
+            flipTimeoutsRef.current[nick] = tid;
+          }
         }
 
         // Green background flash when score increases (keep existing behaviour)
@@ -540,7 +564,7 @@ function HallRow({ place, name, score, realScore, lastScanAt, tickKey }) {
 
   // Play a scale-up pop on each tick (tickKey increments every 100 ms during counting)
   React.useEffect(() => {
-    if (!tickKey || !scoreRef.current) return;
+    if (tickKey === 0 || !scoreRef.current) return;
     scoreRef.current.animate(
       [
         { transform: 'scale(1)',   color: 'var(--fg)' },
