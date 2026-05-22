@@ -21,7 +21,14 @@ function ScreenHallScoreboard() {
   const prevScoresRef = React.useRef({});    // nick -> score string from previous render
 
   const [animatedScores, setAnimatedScores] = React.useState({});  // nick -> currently displayed (animated) score
+  const animatedScoresRef = React.useRef({});                       // mirror of animatedScores for stale-closure-free reads in useLayoutEffect
   const animatingRef = React.useRef({});                            // nick -> active interval id for score counting
+
+  // Updates animated score in both state (for rendering) and ref (for stale-closure-free reads)
+  const setAnimated = React.useCallback((nick, value) => {
+    animatedScoresRef.current[nick] = value;
+    setAnimatedScores(prev => ({ ...prev, [nick]: value }));
+  }, []);
 
   // Initial load on mount
   React.useEffect(() => {
@@ -46,13 +53,28 @@ function ScreenHallScoreboard() {
     return cancel;
   }, []);
 
-  // Timer effect: updates current wall clock and countdown from gameInfo
+  // Cleanup all score-counting intervals on unmount
   React.useEffect(() => {
-    const tick = () => {
-      // Update current wall clock display
+    return () => {
+      Object.values(animatingRef.current).forEach(id => clearInterval(id));
+    };
+  }, []);
+
+  // Effect 1: Wall clock — runs once, ticks every 1 second
+  React.useEffect(() => {
+    const updateClock = () => {
       const now = new Date();
       setCurrentTime(now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      // Update countdown timer
+    };
+    updateClock();
+    const id = setInterval(updateClock, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Effect 2: Countdown — restarts when gameInfo changes; uses recursive setTimeout with adaptive delay
+  React.useEffect(() => {
+    let timeoutId;
+    const tick = () => {
       if (!gameInfo) return;
       if (gameInfo.status === 'finished') { setTimeLeft(gameInfo.award_message || 'ФИНИШ'); return; }
       const target = gameInfo.status === 'active'
@@ -60,14 +82,24 @@ function ScreenHallScoreboard() {
         : gameInfo.starts_at ? new Date(gameInfo.starts_at).getTime() : null;
       if (!target) return;
       const diff = Math.max(0, target - Date.now());
-      const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
-      const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
-      const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
-      setTimeLeft(`${h}:${m}:${s}`);
+      if (diff < 3600000) {
+        // Under 1 hour: show MM:SS.cc with centiseconds
+        const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+        const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+        const cs = String(Math.floor((diff % 1000) / 10)).padStart(2, '0');
+        setTimeLeft(`${m}:${s}.${cs}`);
+        timeoutId = setTimeout(tick, 50); // fast tick so centiseconds appear to run
+      } else {
+        // 1 hour or more: show HH:MM:SS at normal 1s cadence
+        const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
+        const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+        const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+        setTimeLeft(`${h}:${m}:${s}`);
+        timeoutId = setTimeout(tick, 1000);
+      }
     };
     tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
+    return () => clearTimeout(timeoutId);
   }, [gameInfo]);
 
   // FLIP animation: animates rows to their new positions when players list changes
@@ -95,6 +127,14 @@ function ScreenHallScoreboard() {
       newScores[nick] = el.dataset.score;
     });
 
+    // Clear animatedScoresRef entries for nicks no longer in the DOM to prevent stale startValue on re-entry
+    const activeNicks = new Set(Object.keys(newRects));
+    Object.keys(animatedScoresRef.current).forEach(nick => {
+      if (!activeNicks.has(nick)) {
+        delete animatedScoresRef.current[nick];
+      }
+    });
+
     // For each element, apply FLIP if it moved, and a score counting animation if score changed
     elements.forEach(el => {
       const nick = el.dataset.nick;
@@ -111,42 +151,52 @@ function ScreenHallScoreboard() {
       const prevScore = prevScoresRef.current[nick];
       const curScore = newScores[nick];
 
-      // Compute score change metadata used by both counting and FLIP delay
+      // Compute score change metadata
       const prevNum = prevScore !== undefined ? Number(prevScore) : null;
       const curNum  = curScore  !== undefined ? Number(curScore)  : null;
       const scoreChanged = prevNum !== null && curNum !== null && prevNum !== curNum;
-      const absDelta = scoreChanged ? Math.abs(curNum - prevNum) : 0;
-      const numTicks = scoreChanged ? Math.min(Math.ceil(absDelta / 10), 10) : 0;
-      const flipDelay = scoreChanged ? numTicks * 200 : 0;
+      // flipDelay is computed inside if (scoreChanged) based on startTicks
+      let flipDelay = 0;
 
       // Score changed: start counting animation and delay FLIP
       if (scoreChanged) {
-        const delta    = curNum - prevNum;
-        const stepSize = delta > 0
-          ? Math.ceil(absDelta / numTicks)
-          : -Math.ceil(absDelta / numTicks);
+        const delta = curNum - prevNum;
 
         // Cancel any in-progress counting for this nick
         if (animatingRef.current[nick]) {
           clearInterval(animatingRef.current[nick]);
+          delete animatingRef.current[nick];
         }
 
-        // Seed display at the OLD score so counting starts from there
-        setAnimatedScores(prev => ({ ...prev, [nick]: prevNum }));
+        // Start from currently displayed animated value (not real prev score) to avoid jump on rapid updates
+        const startValue = animatedScoresRef.current[nick] ?? prevNum;
+        const startDelta = curNum - startValue;
+        const absStartDelta = Math.abs(startDelta);
+        const startTicks = absStartDelta > 0 ? Math.min(Math.ceil(absStartDelta / 10), 10) : 0;
+        const startStepSize = startDelta > 0
+          ? Math.ceil(absStartDelta / Math.max(startTicks, 1))
+          : -Math.ceil(absStartDelta / Math.max(startTicks, 1));
 
-        // Tick every 200 ms toward curNum
-        let ticksDone = 0;
-        const intervalId = setInterval(() => {
-          ticksDone++;
-          const isLast = ticksDone >= numTicks;
-          const next   = isLast ? curNum : Math.round(prevNum + stepSize * ticksDone);
-          setAnimatedScores(prev => ({ ...prev, [nick]: next }));
-          if (isLast) {
-            clearInterval(intervalId);
-            delete animatingRef.current[nick];
-          }
-        }, 200);
-        animatingRef.current[nick] = intervalId;
+        // FLIP delay matches actual counting duration so row moves only after score finishes ticking
+        flipDelay = startTicks * 200;
+
+        if (startTicks > 0) {
+          // Seed display at the current animated value (smooth continuation if interrupted)
+          setAnimated(nick, startValue);
+          // Tick every 200 ms toward curNum
+          let ticksDone = 0;
+          const intervalId = setInterval(() => {
+            ticksDone++;
+            const isLast = ticksDone >= startTicks;
+            const next   = isLast ? curNum : Math.round(startValue + startStepSize * ticksDone);
+            setAnimated(nick, next);
+            if (isLast) {
+              clearInterval(intervalId);
+              delete animatingRef.current[nick];
+            }
+          }, 200);
+          animatingRef.current[nick] = intervalId;
+        }
 
         // Green background flash when score increases (keep existing behaviour)
         if (delta > 0) {
@@ -254,19 +304,27 @@ function ScreenHallScoreboard() {
                       <span style={{ color: 'var(--muted-2)', padding: '0 0.04em' }}>:</span>
                       <span style={{ color: 'var(--accent)' }}>{timeLeft.slice(6)}</span>
                     </>
-                  : (() => {
-                      // Adaptive font size for award_message or other non-timer text
-                      const msgFontSize = timeLeft.length <= 15 ? 96 : timeLeft.length <= 30 ? 64 : timeLeft.length <= 50 ? 44 : 32;
-                      return (
-                        <span style={{
-                          color: 'var(--accent)',
-                          fontSize: msgFontSize,
-                          whiteSpace: 'normal',
-                          lineHeight: 1.1,
-                          wordBreak: 'break-word',
-                        }}>{timeLeft}</span>
-                      );
-                    })()
+                  : /^\d{2}:\d{2}\.\d{2}$/.test(timeLeft)
+                    ? <>
+                        {timeLeft.slice(0, 2)}
+                        <span style={{ color: 'var(--muted-2)', padding: '0 0.04em' }}>:</span>
+                        {timeLeft.slice(3, 5)}
+                        <span style={{ color: 'var(--muted-2)', padding: '0 0.02em' }}>.</span>
+                        <span style={{ color: 'var(--accent)', fontSize: '0.55em', verticalAlign: 'baseline' }}>{timeLeft.slice(6)}</span>
+                      </>
+                    : (() => {
+                        // Adaptive font size for award_message or other non-timer text
+                        const msgFontSize = timeLeft.length <= 15 ? 96 : timeLeft.length <= 30 ? 64 : timeLeft.length <= 50 ? 44 : 32;
+                        return (
+                          <span style={{
+                            color: 'var(--accent)',
+                            fontSize: msgFontSize,
+                            whiteSpace: 'normal',
+                            lineHeight: 1.1,
+                            wordBreak: 'break-word',
+                          }}>{timeLeft}</span>
+                        );
+                      })()
                 : <span style={{ color: 'var(--muted-2)' }}>--:--:--</span>
               }
             </div>
