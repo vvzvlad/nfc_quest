@@ -343,6 +343,7 @@ function ScreenAdminGame() {
         starts_at: settings.starts_at,
         ends_at: settings.ends_at,
         award_message: settings.award_message,
+        promo_html: settings.promo_html,
       });
       await reloadSettings();
       setSaved(true);
@@ -431,7 +432,17 @@ function ScreenAdminGame() {
             />
           </SectionBlock>
 
-          <SectionBlock title="03 · опасная зона" desc="Действия без отмены. Подтверждение через диалог.">
+          <SectionBlock title="03 · промо HTML (до старта)" desc="Arbitrary HTML shown on the welcome screen and the 'game not started yet' screen. Use for prize lists, rules, etc.">
+            <textarea
+              className="input"
+              rows={6}
+              value={settings.promo_html || ''}
+              onChange={e => setSettings(s => ({ ...s, promo_html: e.target.value }))}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 12, resize: 'vertical' }}
+            />
+          </SectionBlock>
+
+          <SectionBlock title="04 · опасная зона" desc="Действия без отмены. Подтверждение через диалог.">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
               <DangerBtn label="Запустить игру сейчас" sub="откроет окно сканирования всем" onClick={handleStartGame} disabled={gameStatus === 'АКТИВНА'} />
               <DangerBtn label="Остановить игру" sub="закроет сканирование, табло остаётся" danger onClick={handleStopGame} disabled={gameStatus !== 'АКТИВНА'} />

@@ -82,7 +82,8 @@ def _build_scoreboard_data() -> dict:
         "status": game_status,
         "starts_at": settings.starts_at.strftime("%Y-%m-%dT%H:%M:%SZ") if settings and settings.starts_at else None,
         "ends_at": settings.ends_at.strftime("%Y-%m-%dT%H:%M:%SZ") if settings and settings.ends_at else None,
-        "award_message": settings.award_message if settings else "",
+        "award_message": settings.award_message or "" if settings else "",
+        "promo_html": settings.promo_html or "" if settings else "",  # keep WS payload in sync with HTTP scoreboard
     }
 
     total_players = len(players)

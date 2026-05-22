@@ -79,6 +79,7 @@ class GameSettings(db.Model):
     starts_at = db.Column(db.DateTime, nullable=True)
     ends_at = db.Column(db.DateTime, nullable=True)
     award_message = db.Column(db.String(512), default="")
+    promo_html = db.Column(db.Text, default="")  # arbitrary HTML shown pre-game on welcome and not-yet screens
 
     def to_dict(self):
         return {
@@ -86,6 +87,7 @@ class GameSettings(db.Model):
             "starts_at": self.starts_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.starts_at else None,
             "ends_at": self.ends_at.strftime("%Y-%m-%dT%H:%M:%SZ") if self.ends_at else None,
             "award_message": self.award_message or "",
+            "promo_html": self.promo_html or "",
         }
 
     def get_status(self, now=None):

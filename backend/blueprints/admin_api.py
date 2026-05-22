@@ -123,6 +123,10 @@ def put_game():
     if "award_message" in data:
         settings.award_message = data["award_message"]
 
+    if "promo_html" in data:
+        # Coerce non-string values (e.g. null) to empty string to prevent NULL in DB
+        settings.promo_html = data["promo_html"] if isinstance(data["promo_html"], str) else ""
+
     # Validate: if both dates are set, ends_at must be at least 10 minutes after starts_at
     if settings.starts_at is not None and settings.ends_at is not None:
         min_duration = timedelta(minutes=10)
@@ -678,7 +682,7 @@ def _get_or_create_settings() -> GameSettings:
     """Return the singleton GameSettings row, creating it if absent."""
     settings = db.session.get(GameSettings, 1)
     if settings is None:
-        settings = GameSettings(id=1, award_message="")
+        settings = GameSettings(id=1, award_message="", promo_html="")
         db.session.add(settings)
         db.session.commit()
     return settings

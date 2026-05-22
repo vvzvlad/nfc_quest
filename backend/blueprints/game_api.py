@@ -257,7 +257,8 @@ def scoreboard():
         "status": game_status,
         "starts_at": settings.starts_at.strftime("%Y-%m-%dT%H:%M:%SZ") if settings and settings.starts_at else None,
         "ends_at": settings.ends_at.strftime("%Y-%m-%dT%H:%M:%SZ") if settings and settings.ends_at else None,
-        "award_message": settings.award_message if settings else "",
+        "award_message": settings.award_message or "" if settings else "",
+        "promo_html": settings.promo_html or "" if settings else "",  # guard against NULL from pre-migration rows
     }
 
     total_players = len(players)
@@ -299,4 +300,8 @@ def scoreboard():
 @game_api.route("/config", methods=["GET"])
 def config():
     """Return public configuration for the frontend."""
-    return jsonify({"quest_name": current_app.config["QUEST_NAME"]}), 200
+    settings = db.session.get(GameSettings, 1)
+    return jsonify({
+        "quest_name": current_app.config["QUEST_NAME"],
+        "promo_html": settings.promo_html or "" if settings else "",  # guard against NULL from pre-migration rows
+    }), 200

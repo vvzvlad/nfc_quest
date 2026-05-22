@@ -167,7 +167,7 @@ function ScreenLoading() {
 //   'result'       — scan complete, show result screen based on status
 //   'error'        — unexpected API error (network, 5xx, etc.)
 
-function PlayerPage() {
+function PlayerPage({ promoHtml = '' }) {
   const { tagId } = useParams();
 
   // phase controls which screen branch is shown
@@ -361,6 +361,7 @@ function PlayerPage() {
         tagId={tagId}
         onRegister={onRegister}
         error={registrationError}
+        promoHtml={promoHtml}
       />
     );
   }
@@ -410,7 +411,7 @@ function PlayerPage() {
         : <ScanSuccessMinus {...commonScanProps} />;
     }
     if (status === 'locked')     return <ScanLocked   {...commonProps} strategy={scanResult.strategy} />;
-    if (status === 'not_yet')    return <ScanNotYet   {...commonProps} timerTarget={scanResult.starts_at} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} />;
+    if (status === 'not_yet')    return <ScanNotYet   {...commonProps} timerTarget={scanResult.starts_at} startsAt={scanResult.starts_at} registeredCount={scanResult.registered_count} promoHtml={scoreboardData?.game?.promo_html || promoHtml} />;
     if (status === 'finished') {
       // Use rank returned directly by the backend scan response
       if (scanResult.rank && scanResult.rank <= 10) {
@@ -452,10 +453,14 @@ function RequireAuth() {
 
 export default function App() {
   const [quest, setQuest] = React.useState('');
+  const [promoHtml, setPromoHtml] = React.useState('');
   React.useEffect(() => {
-    // Load quest name from backend config on mount; fall back to default if request fails
+    // Load quest name and promo HTML from backend config on mount; fall back to defaults if request fails
     api.config()
-      .then(r => { if (r.ok && r.data?.quest_name) setQuest(r.data.quest_name); })
+      .then(r => {
+        if (r.ok && r.data?.quest_name) setQuest(r.data.quest_name);
+        if (r.ok && r.data?.promo_html != null) setPromoHtml(r.data.promo_html);
+      })
       .catch(() => setQuest('ПЕРИМЕТР'));
   }, []);
   return (
@@ -465,7 +470,7 @@ export default function App() {
         <Route path="/" element={<PhoneHost><ScreenLanding /></PhoneHost>} />
 
         {/* Player flow: tag scan page */}
-        <Route path="/tag/:tagId" element={<PhoneHost><PlayerPage /></PhoneHost>} />
+        <Route path="/tag/:tagId" element={<PhoneHost><PlayerPage promoHtml={promoHtml} /></PhoneHost>} />
 
         {/* Mobile scoreboard */}
         <Route path="/scoreboard" element={<PhoneHost><ScreenScoreboardMobile /></PhoneHost>} />

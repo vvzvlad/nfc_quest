@@ -69,7 +69,7 @@ function QuestFooter({ children }) {
 //   onRegister(nick) — called when the user submits the nick form
 //   error           — string shown in red below the input, or null
 //   tagId           — current tag ID shown in footer hint
-function ScreenRegistration({ onRegister, error, tagId }) {
+function ScreenRegistration({ onRegister, error, tagId, promoHtml }) {
   const [nick, setNick] = React.useState('');
   const [localError, setLocalError] = React.useState(null);
 
@@ -110,6 +110,19 @@ function ScreenRegistration({ onRegister, error, tagId }) {
         }}>
           Сканируйте метки по холлу — копите баллы. Каждую метку можно отсканировать только один раз.
         </p>
+
+        {promoHtml && (
+          <div
+            dangerouslySetInnerHTML={{ __html: promoHtml }}
+            style={{
+              fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6,
+              margin: '0 0 20px',
+              padding: '12px 16px',
+              border: '1px solid var(--line)',
+              background: 'var(--bg-2)',
+            }}
+          />
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <label className="brak">никнейм</label>
@@ -171,7 +184,7 @@ function ScanResultLayout({
   hero, sub, meta, scanLabel = 'scan · ok', wideHero = false,
   boardTimerLabel = 'до конца', boardTimer = '',
   timerTarget,
-  boardSlice, boardEmpty, totalPlayers,
+  boardSlice, boardEmpty, boardEmptyContent, totalPlayers,
 }) {
   const navigate = useNavigate();
   // Live countdown from timerTarget ISO string; falls back to static boardTimer string
@@ -291,7 +304,9 @@ function ScanResultLayout({
           </div>
         </div>
         <div style={{ flex: 1, overflow: 'auto', padding: '0 16px' }}>
-          {boardEmpty
+          {boardEmptyContent
+            ? boardEmptyContent
+            : boardEmpty
             ? <BoardEmptyHint message={boardEmpty} />
             : (boardSlice ?? []).map(([place, name, scoreVal, opts], i) =>
                 opts?.separator
@@ -469,7 +484,15 @@ function ScanLocked({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
 
 // State: quest not started yet (countdown)
 // startsAt — ISO string of when the quest begins
-function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, startsAt, totalPlayers }) {
+function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabel, timerTarget, startsAt, totalPlayers, promoHtml }) {
+  // Build a custom board area content node when promoHtml is provided
+  const boardEmptyContent = promoHtml ? (
+    <div
+      dangerouslySetInnerHTML={{ __html: promoHtml }}
+      style={{ padding: '16px', fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6 }}
+    />
+  ) : null;
+
   return (
     <ScanResultLayout
       user={user || ''}
@@ -484,7 +507,8 @@ function ScanNotYet({ user, score, tagId, boardSlice, boardTimer, boardTimerLabe
       boardTimerLabel={boardTimerLabel || 'до старта'}
       boardTimer={boardTimer || ''}
       timerTarget={timerTarget}
-      boardEmpty="Сканирование ещё не открыто."
+      boardEmpty={boardEmptyContent ? undefined : "Сканирование ещё не открыто."}
+      boardEmptyContent={boardEmptyContent}
       totalPlayers={totalPlayers}
     />
   );
