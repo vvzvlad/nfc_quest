@@ -82,6 +82,12 @@ function ScreenHallScoreboard() {
         : gameInfo.starts_at ? new Date(gameInfo.starts_at).getTime() : null;
       if (!target) return;
       const diff = Math.max(0, target - Date.now());
+      if (diff === 0) {
+        // Game ended on client side: freeze at 00:00.00 and wait for WebSocket finished event.
+        // Do not reschedule — stops the chain until gameInfo updates to 'finished'.
+        setTimeLeft('00:00.00');
+        return;
+      }
       if (diff < 3600000) {
         // Under 1 hour: show MM:SS.cc with centiseconds
         const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
