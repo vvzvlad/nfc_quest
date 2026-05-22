@@ -30,6 +30,16 @@
 #define DELAY_STEP_MS    100
 #define DELAY_DEFAULT_MS 1000
 
+// Feedback for a successful scan: vibrate while flashing the LED green
+static const NotificationSequence sequence_scan_ok = {
+    &message_vibro_on,
+    &message_green_255,
+    &message_delay_100,
+    &message_green_0,
+    &message_vibro_off,
+    NULL,
+};
+
 typedef enum {
     ViewIdMenu = 0,       // Submenu — main menu
     ViewIdFileBrowser,    // FileBrowser — file picker
@@ -50,6 +60,9 @@ typedef enum {
     EvtCustomFilePicked,   // file selected in file browser
     EvtCustomGoMenu,       // return to main menu (used after "All done" screen)
     EvtCustomStoppedByUser, // worker was stopped by user (Back button) — go to menu, not quit
+    EvtCustomMenuScan,     // "Scan" selected in main menu
+    EvtCustomScanResult,   // scan worker read a tag — refresh the popup with the URL
+    EvtCustomScanReady,    // scan worker is ready for the next tag — reset the popup
 } CustomEvent;
 
 typedef struct {
@@ -79,6 +92,8 @@ typedef struct {
     char last_msg[64];    // written before volatile tag_present; DMB in scanner_cb ensures ordering
     char popup_hdr[40];   // persistent storage for popup header string (popup holds pointer)
     char url_preview[64]; // persistent storage for URL preview on polling screen (popup holds pointer)
+    char scan_result[128];// persistent storage for the URL read in Scan mode (popup holds pointer)
+    volatile bool scan_ok;// true when the last scan read a valid URL (drives the green/vibro feedback)
 
     // Settings and state
     uint32_t delay_ms;          // delay between tags in ms (default 1000)
@@ -225,6 +240,71 @@ static size_t build_ndef(const char* url, uint8_t* out, size_t out_cap) {
     i += uri_len;
     out[i++] = 0xFE;
     return i;
+}
+
+// Reverse of pick_prefix: map a URI-record prefix code back to its string
+static const char* prefix_string(uint8_t code) {
+    switch(code) {
+    case 0x01: return "http://www.";
+    case 0x02: return "https://www.";
+    case 0x03: return "http://";
+    case 0x04: return "https://";
+    case 0x05: return "tel:";
+    case 0x06: return "mailto:";
+    default: return "";
+    }
+}
+
+// Parse an NDEF URI record out of a raw page dump (reverse of build_ndef).
+// Walks the TLV chain to the NDEF message TLV (0x03), then decodes the first
+// URI record ('U', type 0x55) into out as prefix + URI. Returns false if no
+// URI record is found or the data is malformed/truncated.
+static bool parse_ndef_url(const uint8_t* buf, size_t len, char* out, size_t out_cap) {
+    size_t i = 0;
+    // Skip leading TLVs until the NDEF message TLV (0x03)
+    while(i < len && buf[i] != 0x03) {
+        uint8_t t = buf[i];
+        if(t == 0xFE) return false;   // terminator TLV — no NDEF message
+        if(t == 0x00) { i++; continue; }  // NULL TLV — single byte, no length
+        if(i + 1 >= len) return false;
+        i += 2 + buf[i + 1];          // type + length + value
+    }
+    if(i >= len || buf[i] != 0x03) return false;
+    i++;
+    if(i >= len) return false;
+    size_t ndef_len = buf[i++];
+    if(ndef_len == 0xFF) {            // 3-byte length form
+        if(i + 1 >= len) return false;
+        ndef_len = ((size_t)buf[i] << 8) | buf[i + 1];
+        i += 2;
+    }
+    (void)ndef_len;
+
+    // NDEF record: header, type length, payload length, type, payload
+    if(i >= len) return false;
+    i++;                              // record header (e.g. 0xD1)
+    if(i >= len) return false;
+    uint8_t type_len = buf[i++];
+    if(i >= len) return false;
+    size_t payload_len = buf[i++];
+    if(i + type_len > len) return false;
+    uint8_t rtype = (type_len >= 1) ? buf[i] : 0;
+    i += type_len;
+    if(rtype != 0x55) return false;   // not a URI ('U') record
+    if(payload_len == 0 || i >= len) return false;
+
+    uint8_t prefix = buf[i++];
+    payload_len--;                    // remaining payload is the URI string
+
+    size_t pos = 0;
+    for(const char* p = prefix_string(prefix); *p && pos < out_cap - 1; p++) {
+        out[pos++] = *p;
+    }
+    for(size_t k = 0; k < payload_len && i + k < len && pos < out_cap - 1; k++) {
+        out[pos++] = (char)buf[i + k];
+    }
+    out[pos] = '\0';
+    return true;
 }
 
 static void scanner_cb(NfcScannerEvent event, void* ctx) {
@@ -400,6 +480,73 @@ static void join_worker(App* app) {
     app->worker = NULL;
 }
 
+// Scan mode: loop forever detecting a tag, reading its NDEF URI, and pushing
+// the result to the popup. Exits only when the user presses Back (stop_request).
+static int32_t scan_worker_thread(void* ctx) {
+    App* app = ctx;
+    while(!app->stop_request) {
+        // Wait for any MfUltralight tag to appear
+        app->tag_present = false;
+        app->last_err = MfUltralightErrorNone;
+        app->scanner = nfc_scanner_alloc(app->nfc);
+        nfc_scanner_start(app->scanner, scanner_cb, app);
+        while(!app->tag_present && !app->stop_request) {
+            furi_delay_ms(50);
+        }
+        nfc_scanner_stop(app->scanner);
+        nfc_scanner_free(app->scanner);
+        app->scanner = NULL;
+        if(app->stop_request) break;
+
+        app->scan_ok = false;
+        if(app->last_err != MfUltralightErrorNone) {
+            snprintf(app->scan_result, sizeof(app->scan_result), "Not an NTAG/MFUL tag");
+        } else {
+            // Read the user memory holding the NDEF message, page by page from page 4
+            uint8_t buf[160];
+            size_t got = 0;
+            for(size_t p = 0; p < sizeof(buf) / 4; p++) {
+                MfUltralightPage pg;
+                MfUltralightError err =
+                    mf_ultralight_poller_sync_read_page(app->nfc, NDEF_START_PAGE + p, &pg);
+                if(err != MfUltralightErrorNone) break;
+                memcpy(&buf[got], pg.data, 4);
+                got += 4;
+            }
+            if(got == 0) {
+                snprintf(app->scan_result, sizeof(app->scan_result), "Read failed");
+            } else if(parse_ndef_url(buf, got, app->scan_result, sizeof(app->scan_result))) {
+                app->scan_ok = true;  // valid URL — triggers green/vibro feedback
+            } else {
+                snprintf(app->scan_result, sizeof(app->scan_result), "No URL on tag");
+            }
+        }
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomScanResult);
+
+        // Show the result for ~1s, then reset to the "ready" screen for the next tag
+        for(uint32_t w = 0; w < 1000 && !app->stop_request; w += 50) {
+            furi_delay_ms(50);
+        }
+        if(app->stop_request) break;
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomScanReady);
+    }
+    view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomStoppedByUser);
+    return 0;
+}
+
+// Show the scan popup and start the scan worker loop
+static void show_scan_and_start(App* app) {
+    popup_reset(app->p_polling);
+    popup_set_header(app->p_polling, "Scanning", 64, 4, AlignCenter, AlignTop);
+    popup_set_text(app->p_polling, "Hold a tag\nto the back", 64, 30, AlignCenter, AlignCenter);
+    app->at_menu = false;
+    view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdPolling);
+
+    app->stop_request = false;
+    app->worker = furi_thread_alloc_ex("scan_worker", 4096, scan_worker_thread, app);
+    furi_thread_start(app->worker);
+}
+
 static void on_result(DialogExResult r, void* c) {
     App* a = c;
     switch(r) {
@@ -480,6 +627,9 @@ static void on_menu_item(void* ctx, uint32_t index) {
     case 2:
         view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomMenuSettings);
         break;
+    case 3:
+        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomMenuScan);
+        break;
     }
 }
 
@@ -497,6 +647,7 @@ static void show_menu(App* app) {
     submenu_add_item(app->menu, start_label, 0, on_menu_item, app);
     submenu_add_item(app->menu, "Select File", 1, on_menu_item, app);
     submenu_add_item(app->menu, "Settings", 2, on_menu_item, app);
+    submenu_add_item(app->menu, "Scan", 3, on_menu_item, app);
 
     app->at_menu = true;
     view_dispatcher_switch_to_view(app->view_dispatcher, ViewIdMenu);
@@ -607,6 +758,24 @@ static bool custom_event_cb(void* ctx, uint32_t event) {
         return true;
     case EvtCustomMenuSettings:
         show_settings(app);
+        return true;
+    case EvtCustomMenuScan:
+        show_scan_and_start(app);
+        return true;
+    case EvtCustomScanResult:
+        // Worker read a tag — refresh the popup. scan_result persists (app field),
+        // so the popup can safely hold a pointer to it.
+        popup_set_header(app->p_polling, "Scan result", 64, 4, AlignCenter, AlignTop);
+        popup_set_text(app->p_polling, app->scan_result, 64, 32, AlignCenter, AlignCenter);
+        // Vibrate and flash green only when a valid URL was read
+        if(app->scan_ok) {
+            notification_message(app->notifications, &sequence_scan_ok);
+        }
+        return true;
+    case EvtCustomScanReady:
+        // Result shown long enough — reset to the ready screen for the next tag
+        popup_set_header(app->p_polling, "Scanning", 64, 4, AlignCenter, AlignTop);
+        popup_set_text(app->p_polling, "Hold a tag\nto the back", 64, 30, AlignCenter, AlignCenter);
         return true;
     case EvtCustomFilePicked:
         // Stop the browser here (safe: we're in the main event loop, not inside the browser callback)
