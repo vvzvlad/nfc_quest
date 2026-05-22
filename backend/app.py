@@ -45,11 +45,21 @@ def create_app(config_class=Config) -> Flask:
     # Bind socketio to socket_events module and register handlers
     _socket_events.init_socketio(socketio, app)
 
-    # Create tables and seed initial GameSettings row
+    # Create tables and run lightweight inline migrations for existing DBs
     with app.app_context():
         db.create_all()
+
+        # Inline migration: add promo_html column if it does not exist yet.
+        # db.create_all() only creates missing *tables*, not missing *columns*,
+        # so SQLite databases created before this field was added need ALTER TABLE.
+        with db.engine.connect() as conn:
+            cols = [row[1] for row in conn.execute(db.text("PRAGMA table_info(game_settings)"))]
+            if "promo_html" not in cols:
+                conn.execute(db.text("ALTER TABLE game_settings ADD COLUMN promo_html TEXT DEFAULT ''"))
+                conn.commit()
+
         if db.session.get(GameSettings, 1) is None:
-            db.session.add(GameSettings(id=1, award_message=""))
+            db.session.add(GameSettings(id=1, award_message="", promo_html=""))
             db.session.commit()
 
     # ---------------------------------------------------------------------------
