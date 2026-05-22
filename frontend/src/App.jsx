@@ -257,12 +257,19 @@ function PlayerPage({ promoHtml = '' }) {
 
       // Only cache terminal outcomes — 'ok' and 'locked' are permanent per-tag;
       // transient states like 'not_yet' or 'rate_limit' must not be cached.
+      // 'finished' is intentionally excluded: rank can still change in the last seconds,
+      // and re-scanning a finished game never deducts points, so caching is not critical.
       const cacheableStatuses = ['ok', 'locked'];
       if (cacheableStatuses.includes(scanData.status)) {
         sessionStorage.setItem('scan_result_' + tag_id, JSON.stringify({
           scanData,
           boardData: boardRes.ok ? boardRes.data : null,
         }));
+        // Replace scan URL with /scoreboard so that page refresh or a repeated NFC open
+        // loads the scoreboard instead of re-triggering the scan API.
+        // Intentionally using window.history.replaceState directly rather than
+        // navigate('/scoreboard') — the latter would unmount PlayerPage and hide the result.
+        window.history.replaceState(null, '', '/scoreboard');
       }
 
       setPhase('result');
