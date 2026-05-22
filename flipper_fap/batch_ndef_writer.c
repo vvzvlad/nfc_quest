@@ -323,8 +323,8 @@ static int32_t worker_thread(void* ctx) {
     app->scanner = nfc_scanner_alloc(app->nfc);
     nfc_scanner_start(app->scanner, scanner_cb, app);
 
-    uint32_t deadline = furi_get_tick() + furi_ms_to_ticks(30000);
-    while(!app->tag_present && !app->stop_request && furi_get_tick() < deadline) {
+    // Wait indefinitely until a tag is detected or user presses Back
+    while(!app->tag_present && !app->stop_request) {
         furi_delay_ms(50);
     }
     nfc_scanner_stop(app->scanner);
@@ -334,11 +334,6 @@ static int32_t worker_thread(void* ctx) {
     if(app->stop_request) {
         // User pressed Back while waiting for tag — return to menu, not quit
         view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomStoppedByUser);
-        return 0;
-    }
-    if(!app->tag_present) {
-        snprintf(app->last_msg, sizeof(app->last_msg), "Timeout - no tag");
-        view_dispatcher_send_custom_event(app->view_dispatcher, EvtCustomTagFail);
         return 0;
     }
     if(app->last_err != MfUltralightErrorNone) {
