@@ -292,3 +292,70 @@ class TestScoreboard:
         assert r.status_code == 200
         stats = r.get_json()["stats"]
         assert stats["scans_per_minute"] > 0
+
+
+class TestScoreboardRecentScans:
+    # E-RS1: recent_scans is present in the response and has the correct structure
+    def test_recent_scans_present_and_structured(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, make_player_id("seed-rs1"), "NickRS1")
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("seed-rs1"), tags[0]["id"])
+
+        r = client.get("/api/scoreboard")
+        assert r.status_code == 200
+        body = r.get_json()
+
+        # recent_scans key must exist and be a list
+        assert "recent_scans" in body
+        assert isinstance(body["recent_scans"], list)
+
+        # At least one scan entry must be present
+        assert len(body["recent_scans"]) >= 1
+
+        # Every entry must contain the required keys
+        for entry in body["recent_scans"]:
+            assert "nick" in entry, f"Entry missing 'nick': {entry}"
+            assert "delta" in entry, f"Entry missing 'delta': {entry}"
+            assert "scanned_at" in entry, f"Entry missing 'scanned_at': {entry}"
+
+    # E-RS2: scanned_at has the correct UTC format with Z-suffix
+    def test_recent_scans_scanned_at_utc_format(self, client, admin_client):
+        from datetime import datetime
+
+        start_game(admin_client)
+        register_player(client, make_player_id("seed-rs2"), "NickRS2")
+        tags = create_tag(admin_client, "random", {"min": 10, "max": 10})
+        rate_limiter.clear()
+        scan_tag(client, make_player_id("seed-rs2"), tags[0]["id"])
+
+        r = client.get("/api/scoreboard")
+        assert r.status_code == 200
+        body = r.get_json()
+
+        first = body["recent_scans"][0]
+        scanned_at = first["scanned_at"]
+
+        # Must be a string
+        assert isinstance(scanned_at, str), f"scanned_at is not a string: {scanned_at!r}"
+
+        # Must end with 'Z' and contain 'T' separator
+        assert scanned_at.endswith("Z"), f"scanned_at does not end with 'Z': {scanned_at!r}"
+        assert "T" in scanned_at, f"scanned_at missing 'T' separator: {scanned_at!r}"
+
+        # Must be parseable as YYYY-MM-DDTHH:MM:SSZ
+        datetime.strptime(scanned_at, "%Y-%m-%dT%H:%M:%SZ")
+
+    # E-RS3: recent_scans is an empty list when no successful scans have occurred
+    def test_recent_scans_empty_when_no_scans(self, client, admin_client):
+        start_game(admin_client)
+        register_player(client, make_player_id("seed-rs3"), "NickRS3")
+        # No scan performed
+
+        r = client.get("/api/scoreboard")
+        assert r.status_code == 200
+        body = r.get_json()
+
+        assert "recent_scans" in body
+        assert body["recent_scans"] == []
