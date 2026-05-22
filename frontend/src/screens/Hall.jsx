@@ -158,6 +158,17 @@ function ScreenHallScoreboard() {
             <Podium items={players.slice(0, 3)} />
           </div>
 
+          {/* promo HTML block — shown below podium when configured in admin panel */}
+          {gameInfo?.promo_html && (
+            <>
+              <div className="hr" />
+              <div
+                dangerouslySetInnerHTML={{ __html: gameInfo.promo_html }}
+                style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.6 }}
+              />
+            </>
+          )}
+
           <div className="hr" />
 
           {/* stats */}
