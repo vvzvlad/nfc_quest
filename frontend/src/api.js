@@ -155,6 +155,10 @@ export const adminApi = {
 // ─── WebSocket (Socket.IO) ─────────────────────────────────────────────────
 // Lazy-loaded: import socket.io-client only when first called.
 let _socket = null;
+// Last known server_uptime value from scoreboard_update payload.
+// Intentionally NOT reset in disconnectSocket() — we want to preserve the baseline across
+// Socket.IO reconnects so that a server restart is detected even after a brief disconnect.
+let _lastServerUptime = null;
 
 export function connectSocket(onUpdate) {
   let cancelled = false;
@@ -165,7 +169,18 @@ export function connectSocket(onUpdate) {
       _socket.disconnect();
     }
     _socket = io(BASE || window.location.origin, { withCredentials: true });
-    _socket.on('scoreboard_update', onUpdate);
+    _socket.on('scoreboard_update', (data) => {
+      // Detect server restart: uptime dropped below previously seen value → reload to pick up new static files
+      const uptime = data?.server_uptime;
+      if (typeof uptime === 'number') {
+        if (_lastServerUptime !== null && uptime < _lastServerUptime) {
+          window.location.reload();
+          return; // skip state update — page is reloading
+        }
+        _lastServerUptime = uptime;
+      }
+      onUpdate(data);
+    });
   });
   // Return cancel function so callers can abort before or after socket is ready
   return () => { cancelled = true; disconnectSocket(); };

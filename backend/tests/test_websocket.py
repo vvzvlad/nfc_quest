@@ -24,6 +24,8 @@ def test_ws_initial_state_on_connect(ws_client):
     assert "players" in data
     assert "game" in data
     assert "stats" in data
+    assert "server_uptime" in data, "server_uptime must be present so clients can detect server restarts"
+    assert isinstance(data["server_uptime"], float), "server_uptime must be a float (seconds)"
     # game must contain status
     assert "status" in data["game"]
 

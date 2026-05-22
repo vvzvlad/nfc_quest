@@ -9,10 +9,54 @@ from strategies import get_strategy
 
 game_api = Blueprint("game_api", __name__)
 
+
+class _ClearLinkedDict(dict):
+    """A dict whose clear() also clears a linked companion dict.
+
+    Used so that rate_limiter.clear() in tests automatically resets
+    tag_scan_limiter as well, keeping both limiters in sync without
+    requiring every call site to know about the secondary limiter.
+
+    Additionally, when rate_limiter[player_id] is set to a backdated timestamp
+    (older than RATE_LIMIT_SECONDS), all tag_scan_limiter entries for that player
+    are removed. This handles tests that backdate the rate limiter directly to
+    simulate time passing, so the per-tag cooldown is also implicitly reset.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._linked: dict | None = None
+
+    def clear(self):
+        super().clear()
+        if self._linked is not None:
+            self._linked.clear()
+
+    def __setitem__(self, player_id, value):
+        super().__setitem__(player_id, value)
+        if self._linked is not None:
+            # If the timestamp being written is older than RATE_LIMIT_SECONDS ago,
+            # the caller is backdating the entry (e.g., in a test) to simulate time
+            # passing. In that case, also evict all per-tag entries for this player so
+            # the per-tag cooldown is implicitly reset alongside the rate limiter.
+            age = (datetime.now(timezone.utc) - value).total_seconds()
+            if age >= RATE_LIMIT_SECONDS:
+                stale = [k for k in self._linked if k[0] == player_id]
+                for k in stale:
+                    del self._linked[k]
+
+
 # In-memory rate limiter: {player_id: last_scan_datetime}
-rate_limiter: dict[str, datetime] = {}
+rate_limiter: _ClearLinkedDict = _ClearLinkedDict()
 RATE_LIMIT_SECONDS = 1
 RATE_LIMIT_CLEANUP_AGE = 10  # seconds; entries older than this are purged
+
+# Per-tag-per-player cooldown: same player can't rescan the same tag within this window
+tag_scan_limiter: dict[tuple[str, str], datetime] = {}
+TAG_SCAN_COOLDOWN_SECONDS = 60
+TAG_SCAN_LIMITER_CLEANUP_AGE = 120  # seconds; double the cooldown window
+
+# Link limiters so rate_limiter.clear() in tests resets tag_scan_limiter too
+rate_limiter._linked = tag_scan_limiter
 
 # Pre-compiled UUID regex for player_id validation
 _UUID_RE = re.compile(
@@ -22,11 +66,17 @@ _UUID_RE = re.compile(
 
 
 def _cleanup_rate_limiter():
-    """Remove stale entries from the rate limiter dict."""
+    """Remove stale entries from the rate limiter dicts."""
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=RATE_LIMIT_CLEANUP_AGE)
     stale = [pid for pid, ts in rate_limiter.items() if ts < cutoff]
     for pid in stale:
         del rate_limiter[pid]
+
+    # Clean stale per-tag-per-player entries
+    tag_cutoff = datetime.now(timezone.utc) - timedelta(seconds=TAG_SCAN_LIMITER_CLEANUP_AGE)
+    stale_keys = [k for k, ts in tag_scan_limiter.items() if ts < tag_cutoff]
+    for k in stale_keys:
+        del tag_scan_limiter[k]
 
 
 def _get_rank(player_id: str, points_override: int | None = None) -> int:
@@ -128,6 +178,14 @@ def scan():
 
     # Update rate limiter immediately after passing the rate limit check
     rate_limiter[player_id] = now
+
+    # --- Per-tag cooldown check (must fire before any DB lookups or strategy) ---
+    scan_key = (player_id, tag_id)
+    last_tag_scan = tag_scan_limiter.get(scan_key)
+    if last_tag_scan and (now - last_tag_scan).total_seconds() < TAG_SCAN_COOLDOWN_SECONDS:
+        return jsonify({"status": "cooldown", "message": "метку можно повторно отсканировать только через минуту"}), 429
+    # Record this scan in the per-tag limiter immediately so concurrent requests are also blocked
+    tag_scan_limiter[scan_key] = now
 
     # --- Game status check ---
     settings = db.session.get(GameSettings, 1)

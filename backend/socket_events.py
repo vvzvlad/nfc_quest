@@ -12,13 +12,17 @@ socketio = None  # will be set by app.py via init_socketio()
 _app = None
 _last_broadcast_status: str | None = None
 _broadcast_thread: threading.Thread | None = None
+# Server start timestamp — set in init_socketio(), not at import time.
+# Used to compute server_uptime in every scoreboard_update payload so clients can detect a restart.
+_server_start_time: float | None = None
 
 
 def init_socketio(sio, app=None):
     """Bind the SocketIO instance and register event handlers."""
-    global socketio, _app
+    global socketio, _app, _server_start_time
     socketio = sio
     _app = app
+    _server_start_time = time.time()  # record actual server start time (not module import time)
 
     @sio.on("connect")
     def on_connect():
@@ -93,6 +97,13 @@ def _build_scoreboard_data() -> dict:
     recent_scans_count = db.session.query(ScanEvent).filter(ScanEvent.scanned_at >= five_min_ago).count()
     scans_per_minute = round(recent_scans_count / 5.0, 1)
 
+    # Guard: _server_start_time is None only if _build_scoreboard_data() is called before
+    # init_socketio() — should not happen in production, but can occur in isolated unit tests.
+    # Fall back to 0.0 to ensure the field is always present in the payload.
+    # Note: 0.0 would trigger a client reload if the client previously saw a larger uptime,
+    # but this path is unreachable in production (init_socketio always runs before any connect).
+    server_uptime = (time.time() - _server_start_time) if _server_start_time is not None else 0.0
+
     recent_events = (
         db.session.query(ScanEvent)
         .options(joinedload(ScanEvent.player))  # eagerly load player to avoid N+1 queries
@@ -118,4 +129,5 @@ def _build_scoreboard_data() -> dict:
             "scans_per_minute": scans_per_minute,
         },
         "recent_scans": recent_scans_data,
+        "server_uptime": server_uptime,  # seconds since server start; client reloads when this drops
     }
